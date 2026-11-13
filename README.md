@@ -38,3 +38,7 @@ VoiceStudio: https://github.com/debpalash/VoiceStudio — review its AGPL-3.0 an
 - Public `/api/voice` has only a basic global API rate limiter; do not set a costly or publicly reachable adapter without stronger protections.
 - No music tracks are bundled. Spoken verses are sequential, not beat-synchronized.
 - Designed for one room-host browser controlling the show and players using phones.
+
+## Updated lyric modes
+
+During writing, choose **Complete a bar** to fill the blank (the server assembles and speaks the entire line), or **Write your own bars** to submit two fully original lines. Both modes use the same voting and voice playback. To update Render, replace the files in your GitHub repository and commit; Render normally redeploys on new commits.
