@@ -67,3 +67,12 @@ Preset MCs are game character cards, **not** recorded voice samples. Custom MCs 
 ### GitHub update
 
 Use GitHub Desktop (recommended): clone your existing repository, copy the **contents** of this ZIP into the cloned repository folder (not a nested folder), accept replacement of existing files, commit and push. Or on GitHub web, upload the root files at repository root, and upload `public/library.html` and `public/index.html` inside the existing `public` folder, plus `server.js` at root. You only need these three changed files for the MC Library. The other files in the ZIP are included for completeness. Render normally redeploys automatically after a push.
+
+## Voice troubleshooting (important)
+Uploading this Node.js game to GitHub and deploying it on Render **does not install or run a voice-cloning model**. A custom MC card or microphone emoji is not a generated custom voice. Without `VOICE_API_URL` pointing to a separately running XTTS-compatible service with access to the saved WAV files, the host uses browser text-to-speech instead.
+
+Check `https://YOUR-RENDER-URL/api/health`. If `voiceAdapterConfigured` is false, cloning cannot work. Even if true, this only confirms configuration, not successful synthesis. Custom voice failures now display an explicit warning during playback. MC cards are now paired with their actual recording IDs rather than independently assigned. Recorded voices and settings on a free Render instance can disappear on redeploy because its disk is ephemeral. A persistent voice service/storage arrangement is required for reliable cloning.
+
+**Beat:** The host browser now starts the beat independently on the audio clock rather than waiting for the browser speech `onstart` callback. The host must click Start Battle or Test Sound to unlock audio; browser speech cannot be perfectly synchronized to the beat. For tight sync, configure an audio-generating TTS service.
+
+**Privacy:** Voice recordings require informed consent. The existing recording and deletion endpoints are not suitable for unrestricted public use; restrict access before inviting strangers.

@@ -63,7 +63,7 @@ const publish = r => {
     code: r.code, phase: r.phase, round: r.round, maxRounds: r.maxRounds, hostConnected: r.hostConnected,
     players: r.players.map(({ id, name, robot, score, connected, submitted }) => ({ id, name, robot, score, connected, submitted })),
     audience: r.audience.length, deadline: r.deadline, battle: r.battle, results: r.results, champion: r.champion,
-    beat: r.beat, hasVoices: r.hasVoices, mcCards: r.mcCards || [], aiEnabled: !!r.aiEnabled, finishReason: r.finishReason || null,
+    beat: r.beat, hasVoices: r.hasVoices, voiceAdapterConfigured: !!process.env.VOICE_API_URL, mcCards: r.mcCards || [], aiEnabled: !!r.aiEnabled, finishReason: r.finishReason || null,
     // Voice owners stay secret until the game is over
     reveal: r.phase === 'finished' ? r.players.filter(p => p.voiceOwner).map(p => ({ name: p.name, robot: p.robot, voice: p.voiceOwner })) : null,
   });
@@ -72,29 +72,23 @@ const error = (cb, message) => cb?.({ ok: false, error: message });
 const timers = r => { clearTimeout(r.timer); r.timer = null; };
 const cleanup = r => { timers(r); rooms.delete(r.code); io.to(r.code).emit('closed'); };
 
-// Secretly deal a random household voice to every player (never their own, when names match)
-function assignVoices(r) {
-  const voices = loadVoices().filter(v => v.enabled !== false);
-  r.hasVoices = voices.length > 0;
-  const pool = shuffle(voices);
-  const used = new Set();
-  for (const p of r.players) {
-    const notMine = v => v.owner.toLowerCase() !== p.name.toLowerCase();
-    const pick = pool.find(v => !used.has(v.id) && notMine(v)) || pool.find(notMine) || pool[0];
-    p.voiceId = pick?.id || null;
-    p.voiceOwner = pick?.owner || null;
-    if (pick) used.add(pick.id);
-  }
-}
-
+// MC card and voice identity are dealt together. A custom card is never silently
+// mapped to an unrelated recording. The icon alone is not proof of synthesis.
 function dealCards(r) {
   timers(r); r.phase = 'cards'; r.deadline = Date.now() + 12000;
-  const available = mcLibrary().filter(mc => mc.enabled);
-  const cards = available.length ? available : DEFAULT_MCS;
-  r.mcCards = shuffle([...cards.map(mc => mc.emoji)]);
-  while (r.mcCards.length < r.players.length) r.mcCards.push(...shuffle(cards.map(mc => mc.emoji)));
-  r.players.forEach((p, i) => { p.robot = r.mcCards[i]; });
-  publish(r); r.timer = setTimeout(() => startRound(r), 12000);
+  const enabled = mcLibrary().filter(mc => mc.enabled);
+  const pool = shuffle(enabled.length ? enabled : DEFAULT_MCS);
+  r.mcCards = pool.map(mc => mc.emoji);
+  for (let i = 0; i < r.players.length; i++) {
+    const p = r.players[i], mc = pool[i % pool.length];
+    p.robot = mc.emoji;
+    p.mcId = mc.id;
+    p.voiceId = mc.type === 'custom' ? mc.id : null;
+    p.voiceOwner = mc.type === 'custom' ? mc.owner : null;
+  }
+  r.hasVoices = r.players.some(p => !!p.voiceId);
+  publish(r);
+  r.timer = setTimeout(() => startRound(r), 12000);
 }
 function startRound(r) {
   timers(r); r.round++; r.phase = 'writing'; r.deadline = Date.now() + 120000; r.results = null; r.battle = null;
@@ -129,7 +123,12 @@ function finishVoting(r) {
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: '8kb' }));
 app.use('/api', rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: 'draft-7', legacyHeaders: false }));
-app.get('/api/health', (_q, res) => res.json({ ok: true, rooms: rooms.size, voice: !!process.env.VOICE_API_URL, voices: loadVoices().length }));
+app.get('/api/health', (_q, res) => res.json({ ok: true, rooms: rooms.size,
+  voiceAdapterConfigured: !!process.env.VOICE_API_URL,
+  customVoiceSynthesisAvailable: !!process.env.VOICE_API_URL,
+  recordings: loadVoices().length,
+  note: process.env.VOICE_API_URL ? 'Adapter configured; actual synthesis must be tested' : 'No voice cloning engine configured; browser speech only'
+}));
 
 // ---- Voice library API (used by /record.html) ----
 app.get('/api/voices', (_q, res) => res.json(loadVoices().map(({ id, owner, createdAt }) => ({ id, owner, createdAt }))));
@@ -207,7 +206,7 @@ app.use(express.static(path.join(__dir, 'public')));
 io.on('connection', s => {
   s.on('host:create', (data, cb) => { if (s.data.code) return error(cb, 'Already in a room'); const c = code(); const r = { code: c, host: s.id, hostConnected: true, phase: 'lobby', round: 0, maxRounds: 3, players: [], audience: [], timer: null, deadline: 0, battle: null, results: null, champion: null, votes: new Map(), beat: null, hasVoices: false, aiEnabled: false, mcCards: [], finishReason: null }; rooms.set(c, r); s.data = { code: c, role: 'host' }; s.join(c); cb?.({ ok: true, code: c, token: crypto.randomUUID() }); publish(r); });
   s.on('join', (data, cb) => { if (s.data.code) return error(cb, 'Already joined'); const r = rooms.get(safe(data?.code, 4).toUpperCase()); if (!r) return error(cb, 'Room not found'); const name = safe(data?.name, 18); if (name.length < 2) return error(cb, 'Enter a name (2–18 characters)'); if (r.phase !== 'lobby') return error(cb, 'This game has already started'); if (all(r).some(p => p.name.toLowerCase() === name.toLowerCase())) return error(cb, 'Name already taken'); const audience = r.players.length >= MAX_PLAYERS; if (audience && r.audience.length >= MAX_AUDIENCE) return error(cb, 'Room full'); const p = { id: s.id, name, robot: audience ? '👀' : '❔', score: 0, connected: true, submitted: false, lines: [], voiceId: null, voiceOwner: null }; (audience ? r.audience : r.players).push(p); s.data = { code: r.code, role: audience ? 'audience' : 'player' }; s.join(r.code); cb?.({ ok: true, id: s.id, role: s.data.role, code: r.code }); publish(r); });
-  s.on('host:start', (_, cb) => { const r = rooms.get(s.data.code); if (!r || r.host !== s.id) return error(cb, 'Only host can start'); if (r.phase !== 'lobby' || r.players.length < 1) return error(cb, 'Need at least 1 player in lobby'); r.aiEnabled = !!_?.ai; if (r.players.length % 2 && r.aiEnabled) { r.players.push({ id: 'ai-' + crypto.randomUUID(), name: 'MC BYTE', robot: '❔', ai: true, score: 0, connected: true, submitted: true, lines: [], voiceId: null, voiceOwner: null }); } if (r.players.length < 2) return error(cb, 'Need 2 players, or enable AI challenger'); assignVoices(r); dealCards(r); cb?.({ ok: true }); });
+  s.on('host:start', (_, cb) => { const r = rooms.get(s.data.code); if (!r || r.host !== s.id) return error(cb, 'Only host can start'); if (r.phase !== 'lobby' || r.players.length < 1) return error(cb, 'Need at least 1 player in lobby'); r.aiEnabled = !!_?.ai; if (r.players.length % 2 && r.aiEnabled) { r.players.push({ id: 'ai-' + crypto.randomUUID(), name: 'MC BYTE', robot: '❔', ai: true, score: 0, connected: true, submitted: true, lines: [], voiceId: null, voiceOwner: null }); } if (r.players.length < 2) return error(cb, 'Need 2 players, or enable AI challenger'); dealCards(r); cb?.({ ok: true }); });
   s.on('host:rendered', (data, cb) => { const r = rooms.get(s.data.code); if (!r || r.host !== s.id || r.phase !== 'rendering') return error(cb, 'Not rendering'); const ms = Math.min(300000, Math.max(45000, (Number(data?.durationMs) || 0) + 20000)); beginVoting(r, ms); cb?.({ ok: true }); });
   s.on('submit', (data, cb) => { const r = rooms.get(s.data.code), p = r && player(r, s.id); if (!p || r.phase !== 'writing') return error(cb, 'Not writing now'); if (p.submitted) return error(cb, 'Already submitted'); if (!Array.isArray(data?.fills) || data.fills.length !== 2 || !Array.isArray(data?.customs) || data.customs.length !== 2) return error(cb, 'Fill in both words and write both bars'); const fills = data.fills.map(x => safe(x, 24)), customs = data.customs.map(x => safe(x, 100)); if (fills.some(x => x.length < 1)) return error(cb, 'Fill in both blanks'); if (customs.some(x => x.length < 3)) return error(cb, 'Both of your own bars need at least 3 characters'); p.lines = [fillBar(p.prompts[0], fills[0]), customs[0], fillBar(p.prompts[1], fills[1]), customs[1]]; p.submitted = true; cb?.({ ok: true }); publish(r); if (r.players.every(x => x.submitted)) startBattle(r); });
   s.on('vote', (data, cb) => { const r = rooms.get(s.data.code); if (!r || r.phase !== 'voting' || s.data.role === 'host') return error(cb, 'Voting closed'); if (r.votes.has(s.id)) return error(cb, 'Already voted'); if (!r.players.some(p => p.id === data?.id) || data.id === s.id) return error(cb, 'Invalid vote'); r.votes.set(s.id, data.id); cb?.({ ok: true }); const voters = [...r.players, ...r.audience].filter(p => p.connected && !p.ai); if (r.votes.size >= voters.length) finishVoting(r); });

@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id), socket = io();
-let role = '', self = '', state = null, questions = [], voted = false, lastPhase = '', preparedKey = '', performedKey = '', plan = null, playing = [], timeouts = [], renderMsg = '', msPerSyl = 230, draft = { fill1: '', cus1: '', fill2: '', cus2: '' };
+let voiceWarnings = []; let role = '', self = '', state = null, questions = [], voted = false, lastPhase = '', preparedKey = '', performedKey = '', plan = null, playing = [], timeouts = [], renderMsg = '', msPerSyl = 230, draft = { fill1: '', cus1: '', fill2: '', cus2: '' };
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const show = id => { for (const x of ['home', 'join', 'game']) $(x).classList.toggle('hidden', x !== id); };
 const send = (event, data, ok) => socket.emit(event, data, r => { if (!r?.ok) return alert(r?.error || 'Server error'); ok?.(r); });
@@ -26,7 +26,7 @@ function render() {
   $('phaseLabel').textContent = state.phase.toUpperCase() + ' • ROUND ' + state.round + '/' + state.maxRounds;
   const c = $('content'); const players = state.players; const me = players.find(p => p.id === self); let html = '';
   if (state.phase === 'lobby') {
-    html = `<div class="arena"><p>JOIN ON YOUR PHONE</p><div class="code">${state.code}</div><p>${esc(location.origin)} • Enter this room code</p><div class="roster">${players.map(bot).join('')}</div><p>${players.length}/8 rappers • ${state.audience} audience members</p>${role === 'host' ? `<label class="ai-option"><input type="checkbox" id="aiToggle"> Add AI challenger when player count is odd</label><button id="start" ${players.length < 1 ? 'disabled' : ''}>START BATTLE</button> <button id="test" class="secondary">🔊 TEST SOUND</button>` : '<p class="status">Waiting for host to start...</p>'}</div>`;
+    html = `<div class="arena"><p>JOIN ON YOUR PHONE</p><div class="code">${state.code}</div><p>${esc(location.origin)} • Enter this room code</p><div class="roster">${players.map(bot).join('')}</div>${!state.voiceAdapterConfigured ? '<p class="status">⚠ Voice cloning is NOT configured on this server. Custom recordings will NOT be spoken in your voice. Browser voices only.</p>' : '<p class="muted">Voice adapter configured; test custom synthesis before playing.</p>'}<p>${players.length}/8 rappers • ${state.audience} audience members</p>${role === 'host' ? `<label class="ai-option"><input type="checkbox" id="aiToggle"> Add AI challenger when player count is odd</label><button id="start" ${players.length < 1 ? 'disabled' : ''}>START BATTLE</button> <button id="test" class="secondary">🔊 TEST SOUND</button>` : '<p class="status">Waiting for host to start...</p>'}</div>`;
   }
   if (state.phase === 'cards') {
     html = `<div class="arena"><h1>🃏 MYSTERY MC CARDS</h1><p>Every MC has been dealt a random card. Identities stay hidden until the rap begins!</p><div class="timer" id="timer"></div><div class="roster">${(state.mcCards || []).map((card, i) => `<div class="bot secret-card"><div class="face">${esc(card)}</div><strong>MC ???</strong><small>Card ${i + 1}</small></div>`).join('')}</div></div>`;
@@ -110,8 +110,8 @@ function speakFit(text, pitch, barSec, onstart) {
 async function prepareBattle(s) {
   const key = s.code + ':' + s.round; if (preparedKey === key) return; preparedKey = key; plan = null;
   const ctx = Beat.init(); await ctx.resume();
-  if (!s.hasVoices) { renderMsg = 'Tuning the bot voices…'; if ($('renderProgress')) $('renderProgress').textContent = renderMsg; await calibrateSpeech(); }
-  const clips = [], total = (s.battle || []).reduce((n, p) => n + p.lines.length, 0); let n = 0;
+  if (!s.voiceAdapterConfigured) { renderMsg = 'Tuning the bot voices…'; if ($('renderProgress')) $('renderProgress').textContent = renderMsg; await calibrateSpeech(); }
+  voiceWarnings = []; const clips = [], total = (s.battle || []).reduce((n, p) => n + p.lines.length, 0); let n = 0;
   for (const p of s.battle || []) for (let idx = 0; idx < p.lines.length; idx++) {
     const line = p.lines[idx];
     renderMsg = `Recording line ${++n} of ${total}…`; if ($('renderProgress')) $('renderProgress').textContent = renderMsg;
@@ -119,10 +119,20 @@ async function prepareBattle(s) {
     if (s.hasVoices) {
       try {
         const r = await fetch('/api/voice', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: s.code, pid: p.id, text: line }) });
-        if (r.ok) buf = trimClip(await ctx.decodeAudioData(await r.arrayBuffer()));
-      } catch { /* falls back to browser speech */ }
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}));
+          throw Error(e.detail || e.error || `HTTP ${r.status}`);
+        }
+        buf = trimClip(await ctx.decodeAudioData(await r.arrayBuffer()));
+      } catch (e) {
+        voiceWarnings.push(`${p.name}: ${e.message}`);
+      }
     }
     clips.push({ p, idx, line, buf });
+  }
+  if (voiceWarnings.length) {
+    renderMsg = `⚠ Custom voice failed; browser voice used instead. ${voiceWarnings[0]}`;
+    if ($('renderProgress')) $('renderProgress').textContent = renderMsg;
   }
   // Every line is ONE rapped bar. The first bar is an instrumental intro.
   const st = s.beat, mBar = 240 / st.bpm, rapBar = barSecOf(st); let bars = 0; const items = [];
@@ -143,8 +153,7 @@ function perform(s) {
   // Audio-buffer voices and the beat use the SAME AudioContext clock.
   // Browser speech has no scheduled-start API, so its first onstart callback
   // starts the beat instead; later bars use the resulting clock anchor.
-  const fallbackFirst = first && !first.buf;
-  const startAt = fallbackFirst ? null : Beat.start(plan.beat.name);
+  const startAt = Beat.start(plan.beat.name, ctx.currentTime + 0.35);
   function scheduleRest(t0, skipFirst) {
     for (const [index, it] of plan.items.entries()) {
       if (skipFirst && index === 0) continue;
@@ -163,13 +172,13 @@ function perform(s) {
       }, delay));
     }
   }
-  if (fallbackFirst && 'speechSynthesis' in window) {
-    speakFit(first.line, first.p.robot === '👾' ? 0.65 : 1.3, plan.rapBar, () => {
-      const t0 = Beat.start(plan.beat.name, ctx.currentTime + 0.02);
-      document.querySelector(`[data-k="${first.p.id}:${first.idx}"]`)?.classList.add('now');
-      scheduleRest(t0, true);
-    });
-  } else if (startAt !== null) scheduleRest(startAt, false);
+  scheduleRest(startAt, false);
+  if (voiceWarnings.length) {
+    const notice = document.createElement('p');
+    notice.className = 'status';
+    notice.textContent = '⚠ Custom voice unavailable. Browser voice is playing instead. ' + voiceWarnings[0];
+    $('content')?.prepend(notice);
+  }
 }
 function stopShow() {
   playing.forEach(x => { try { x.stop(); } catch { } }); playing = [];
