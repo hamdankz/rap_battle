@@ -1,0 +1,49 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Record your voice • Robo Rhyme Royale</title><link rel="stylesheet" href="/style.css">
+<style>.rec{max-width:640px;margin:auto;text-align:left}.rec h2{color:var(--cyan);margin:26px 0 6px}.rec .say{background:#100e25;border:1px solid #62558d;border-radius:12px;padding:14px;color:#fff;line-height:1.6}.rec label.c{display:flex;gap:10px;align-items:flex-start;margin:18px 0;color:#c4bde6}.rec label.c input{width:auto;margin:4px 0 0}.rec .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin:14px 0}.rec audio{width:100%;margin:10px 0}.rec .voice{display:flex;justify-content:space-between;align-items:center;background:#2d2652;border-radius:12px;padding:10px 14px;margin:8px 0}.rec .voice button{min-height:36px;padding:6px 12px;font-size:14px}#msg{color:var(--yellow);font-weight:700;min-height:24px}</style></head><body><main><div class="panel"><div class="rec">
+<a href="/" style="color:#b9addf">← Back to game</a>
+<h1 style="font-size:clamp(30px,6vw,52px)">🎙️ RECORD YOUR VOICE</h1>
+<p>Your voice becomes a secret MC in the game. Each player gets a random household voice and finds out whose it was at the end.</p>
+<input id="owner" placeholder="YOUR NAME" maxlength="24" autocomplete="off">
+<label class="c"><input type="checkbox" id="consent"><span>I'm happy for my voice to be copied and used by this game on this computer. I can delete it any time below.</span></label>
+<h2>What to say (about 1–2 minutes)</h2>
+<p><strong>1. Normal voice:</strong></p><div class="say">The quick brown fox jumps over the lazy dog. Nobody expected the bus to arrive early, but there it was, right on time. Check, one, two, three, four.</div>
+<p><strong>2. Hype voice, like an MC:</strong></p><div class="say">Yo, step up, you're not ready! I'm the king of this house and I run this place!</div>
+<p><strong>3. In rhythm, tapping a beat:</strong></p><div class="say">I woke up early, made some tea, nobody's better than me, you'll see.</div>
+<p class="muted">Quiet room, phone 10–15 cm from your mouth, steady volume. Repeat the three parts if you need to fill a minute.</p>
+<div class="row"><button id="recBtn">⏺ START RECORDING</button><span id="clock" class="timer" style="font-size:20px"></span></div>
+<p class="muted" id="micNote"></p>
+<div class="row"><label class="muted">No mic access here? Upload a voice memo instead:&nbsp;<input type="file" id="file" accept="audio/*" style="display:inline;max-width:260px;font-size:14px;padding:8px"></label></div>
+<audio id="preview" controls class="hidden"></audio>
+<div class="row"><button id="saveBtn" class="secondary hidden">✅ SAVE MY VOICE</button></div>
+<div id="msg"></div>
+<h2>Saved voices</h2><div id="list"></div>
+</div></div></main>
+<script>
+const $=id=>document.getElementById(id);let rec,chunks=[],wav=null,tStart=0,tick;
+if(!navigator.mediaDevices?.getUserMedia)$('micNote').textContent='Mic recording needs https:// or http://localhost. On a phone over Wi-Fi, record a voice memo and upload it instead.';
+async function toWav(arr){const ac=new(window.AudioContext||window.webkitAudioContext)();const dec=await ac.decodeAudioData(arr);ac.close();
+ const off=new OfflineAudioContext(1,Math.ceil(dec.duration*24000),24000);const s=off.createBufferSource();s.buffer=dec;s.connect(off.destination);s.start();
+ const d=(await off.startRendering()).getChannelData(0);const buf=new ArrayBuffer(44+d.length*2),v=new DataView(buf);
+ const w=(o,t)=>{for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i))};
+ w(0,'RIFF');v.setUint32(4,36+d.length*2,true);w(8,'WAVE');w(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,24000,true);v.setUint32(28,48000,true);v.setUint16(32,2,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,d.length*2,true);
+ for(let i=0;i<d.length;i++)v.setInt16(44+i*2,Math.max(-1,Math.min(1,d[i]))*32767,true);
+ return new Blob([buf],{type:'audio/wav'})}
+async function setClip(blob){try{$('msg').textContent='Processing…';wav=await toWav(await blob.arrayBuffer());$('preview').src=URL.createObjectURL(wav);$('preview').classList.remove('hidden');$('saveBtn').classList.remove('hidden');$('msg').textContent='Listen back. If it sounds clear, save it.'}catch{$('msg').textContent='Could not read that audio. Try again.'}}
+$('recBtn').onclick=async()=>{
+ if(rec&&rec.state==='recording'){rec.stop();return}
+ try{const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:true,autoGainControl:false}});
+  chunks=[];rec=new MediaRecorder(stream);rec.ondataavailable=e=>chunks.push(e.data);
+  rec.onstop=()=>{clearInterval(tick);stream.getTracks().forEach(t=>t.stop());$('recBtn').textContent='⏺ RE-RECORD';setClip(new Blob(chunks,{type:rec.mimeType}))};
+  rec.start();tStart=Date.now();$('recBtn').textContent='⏹ STOP';tick=setInterval(()=>{const s=Math.floor((Date.now()-tStart)/1000);$('clock').textContent=s+'s (aim for 60+)';if(s>=150)rec.stop()},500)
+ }catch{$('msg').textContent='Mic blocked or unavailable. Upload a voice memo instead.'}};
+$('file').onchange=e=>{if(e.target.files[0])setClip(e.target.files[0])};
+$('saveBtn').onclick=async()=>{
+ if(!$('consent').checked)return $('msg').textContent='Please tick the consent box first.';
+ const r=await fetch('/api/voices?consent=1&owner='+encodeURIComponent($('owner').value),{method:'POST',headers:{'Content-Type':'audio/wav'},body:wav});
+ const j=await r.json();$('msg').textContent=j.ok?'Saved! Your voice is in the game.':(j.error||'Could not save');if(j.ok){$('saveBtn').classList.add('hidden');load()}};
+async function load(){const v=await (await fetch('/api/voices')).json();$('list').innerHTML=v.length?'':'<p class="muted">No voices yet.</p>';
+ for(const x of v){const d=document.createElement('div');d.className='voice';const s=document.createElement('span');s.textContent=x.owner;const b=document.createElement('button');b.className='ghost';b.textContent='Delete';
+  b.onclick=async()=>{const n=prompt('Type the name this voice was saved under to delete it:');if(!n)return;const r=await fetch('/api/voices/'+x.id+'?owner='+encodeURIComponent(n),{method:'DELETE'});const j=await r.json();if(!j.ok)alert(j.error);load()};
+  d.append(s,b);$('list').append(d)}}
+load();
+</script></body></html>
