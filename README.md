@@ -48,3 +48,12 @@ VoiceStudio: https://github.com/debpalash/VoiceStudio — review its AGPL-3.0 an
 Each game deals every player a random recorded voice (never one saved under their own player name) and reveals whose voice it was on the final screen. After writing ends, the host screen renders every line (a "studio" step that is slow on a CPU-only laptop, quick with a GPU), then plays them over a generated beat that rotates each round: Boom Bap, Trap, UK Drill. With no recorded voices or no adapter, it falls back to browser speech.
 
 The voice list on `/record.html` shows who recorded, so keep that page to the household, and run the game on your home network, not a public host. Docker note: mount a volume at `/app/voices` to keep recordings.
+
+## November update: mystery MCs, forfeit, AI, beat sync
+
+- Starting a game now deals a shuffled eight-card MC roster. A 12-second mystery-card reveal screen appears **before** writing. Player names are concealed on the writing and studio rosters, and the stage reveals them at performance time.
+- The lobby offers an optional **AI challenger for odd player counts**, including solo testing. MC BYTE uses a rotating library of prewritten four-bar verses (offline scripted bot, not a generative AI service). It cannot cast votes.
+- A player disconnect during an active match ends the game and awards a forfeit to the highest-scoring remaining connected human (or the bot if no human remains). This is immediate, including short network interruptions; reconnection grace is not implemented.
+- Beat and prerecorded vocal clips now share the same Web Audio clock, starting with the first performed bar (no instrumental intro). When browser speech synthesis is used instead, the beat starts on the first utterance's `onstart` event; browser TTS cannot guarantee sample-accurate timing.
+
+To update Render, replace the repository files and commit; Render normally redeploys automatically.

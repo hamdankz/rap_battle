@@ -2,3 +2,5 @@
 
 .linkbtn{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;border-radius:12px;background:var(--yellow);color:#170c29;font-weight:700;padding:16px 24px;min-height:52px;box-shadow:0 5px 0 #b39a2f}h2{color:var(--cyan)}
 .fillrow{display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap;color:#fff;font-size:18px}.fillrow input{max-width:220px;margin:8px 0}.syl{font-size:14px;min-height:20px}.syl.ok{color:#5dff9a}.syl.near{color:var(--yellow)}.syl.off{color:#ff8a8a}.lyrics p.now{color:var(--yellow);font-weight:700}
+
+.ai-option{display:flex;align-items:center;justify-content:center;gap:10px;margin:18px;color:#ffe066}.ai-option input{width:auto;margin:0}.secret-card{min-width:140px;background:linear-gradient(140deg,#47327d,#1a1740);border:2px solid #ffe066}.secret-card .face{font-size:62px}

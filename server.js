@@ -33,6 +33,8 @@ const BEATS = [
   { name: 'UK Drill', bpm: 142, lineBars: 2 },
 ];
 
+const MC_CARDS = ['🤖','👾','🦾','🛸','⚡','🔩','🧠','🚀'];
+const AI_LINES = [['My CPU is blazing, I am taking the crown','Your tiny little speakers cannot handle my sound','I am made of metal, I was built for the show','You are running on batteries, I am stealing the flow'],['I entered the arena with a laser-bright grin','Your rusty old firmware never stood a chance to win','My motherboard is golden, every rhyme is elite','Now reboot your whole system and get off of my beat']];
 const prompts = ['I rolled into the club with a pocket of ___', 'Your robot is so rusty it smells like ___', 'My rhymes hit harder than a flying ___', 'I stole your batteries and bought a ___', 'My circuits are hotter than a ___', 'You call that a rap? Sounds like a ___', 'I upgraded my brain with a giant ___', 'Your dance moves look like a broken ___'];
 const safe = (s, n = 80) => String(s ?? '').replace(/[<>\u0000-\u001f]/g, '').trim().slice(0, n);
 const code = () => { let c; do { c = Array.from(crypto.randomBytes(4), x => 'ABCDEFGHJKLMNPQRSTUVWXYZ'[x % 24]).join(''); } while (rooms.has(c)); return c; };
@@ -46,7 +48,7 @@ const publish = r => {
     code: r.code, phase: r.phase, round: r.round, maxRounds: r.maxRounds, hostConnected: r.hostConnected,
     players: r.players.map(({ id, name, robot, score, connected, submitted }) => ({ id, name, robot, score, connected, submitted })),
     audience: r.audience.length, deadline: r.deadline, battle: r.battle, results: r.results, champion: r.champion,
-    beat: r.beat, hasVoices: r.hasVoices,
+    beat: r.beat, hasVoices: r.hasVoices, mcCards: r.mcCards || [], aiEnabled: !!r.aiEnabled, finishReason: r.finishReason || null,
     // Voice owners stay secret until the game is over
     reveal: r.phase === 'finished' ? r.players.filter(p => p.voiceOwner).map(p => ({ name: p.name, robot: p.robot, voice: p.voiceOwner })) : null,
   });
@@ -70,13 +72,19 @@ function assignVoices(r) {
   }
 }
 
+function dealCards(r) {
+  timers(r); r.phase = 'cards'; r.deadline = Date.now() + 12000;
+  r.mcCards = shuffle(MC_CARDS);
+  r.players.forEach((p, i) => { p.robot = r.mcCards[i]; });
+  publish(r); r.timer = setTimeout(() => startRound(r), 12000);
+}
 function startRound(r) {
   timers(r); r.round++; r.phase = 'writing'; r.deadline = Date.now() + 120000; r.results = null; r.battle = null;
   r.beat = BEATS[(r.round - 1) % BEATS.length];
   for (const p of r.players) {
-    p.submitted = false; p.lines = [];
+    p.submitted = !!p.ai; p.lines = p.ai ? [...AI_LINES[(r.round - 1) % AI_LINES.length]] : [];
     p.prompts = [prompts[(r.round * 3 + r.players.indexOf(p)) % prompts.length], prompts[(r.round * 3 + r.players.indexOf(p) + 4) % prompts.length]];
-    io.to(p.id).emit('prompt', { prompts: p.prompts });
+    if (!p.ai) io.to(p.id).emit('prompt', { prompts: p.prompts });
   }
   publish(r); r.timer = setTimeout(() => startBattle(r), 120000);
 }
@@ -156,14 +164,14 @@ app.post('/api/voice', async (req, res) => {
 app.use(express.static(path.join(__dir, 'public')));
 
 io.on('connection', s => {
-  s.on('host:create', (data, cb) => { if (s.data.code) return error(cb, 'Already in a room'); const c = code(); const r = { code: c, host: s.id, hostConnected: true, phase: 'lobby', round: 0, maxRounds: 3, players: [], audience: [], timer: null, deadline: 0, battle: null, results: null, champion: null, votes: new Map(), beat: null, hasVoices: false }; rooms.set(c, r); s.data = { code: c, role: 'host' }; s.join(c); cb?.({ ok: true, code: c, token: crypto.randomUUID() }); publish(r); });
-  s.on('join', (data, cb) => { if (s.data.code) return error(cb, 'Already joined'); const r = rooms.get(safe(data?.code, 4).toUpperCase()); if (!r) return error(cb, 'Room not found'); const name = safe(data?.name, 18); if (name.length < 2) return error(cb, 'Enter a name (2–18 characters)'); if (r.phase !== 'lobby') return error(cb, 'This game has already started'); if (all(r).some(p => p.name.toLowerCase() === name.toLowerCase())) return error(cb, 'Name already taken'); const audience = r.players.length >= MAX_PLAYERS; if (audience && r.audience.length >= MAX_AUDIENCE) return error(cb, 'Room full'); const p = { id: s.id, name, robot: audience ? '👀' : ['🤖', '👾', '🦾', '🛸', '⚡', '🔩', '🧠', '🚀'][r.players.length], score: 0, connected: true, submitted: false, lines: [], voiceId: null, voiceOwner: null }; (audience ? r.audience : r.players).push(p); s.data = { code: r.code, role: audience ? 'audience' : 'player' }; s.join(r.code); cb?.({ ok: true, id: s.id, role: s.data.role, code: r.code }); publish(r); });
-  s.on('host:start', (_, cb) => { const r = rooms.get(s.data.code); if (!r || r.host !== s.id) return error(cb, 'Only host can start'); if (r.phase !== 'lobby' || r.players.length < 2) return error(cb, 'Need at least 2 players in lobby'); assignVoices(r); startRound(r); cb?.({ ok: true }); });
+  s.on('host:create', (data, cb) => { if (s.data.code) return error(cb, 'Already in a room'); const c = code(); const r = { code: c, host: s.id, hostConnected: true, phase: 'lobby', round: 0, maxRounds: 3, players: [], audience: [], timer: null, deadline: 0, battle: null, results: null, champion: null, votes: new Map(), beat: null, hasVoices: false, aiEnabled: false, mcCards: [], finishReason: null }; rooms.set(c, r); s.data = { code: c, role: 'host' }; s.join(c); cb?.({ ok: true, code: c, token: crypto.randomUUID() }); publish(r); });
+  s.on('join', (data, cb) => { if (s.data.code) return error(cb, 'Already joined'); const r = rooms.get(safe(data?.code, 4).toUpperCase()); if (!r) return error(cb, 'Room not found'); const name = safe(data?.name, 18); if (name.length < 2) return error(cb, 'Enter a name (2–18 characters)'); if (r.phase !== 'lobby') return error(cb, 'This game has already started'); if (all(r).some(p => p.name.toLowerCase() === name.toLowerCase())) return error(cb, 'Name already taken'); const audience = r.players.length >= MAX_PLAYERS; if (audience && r.audience.length >= MAX_AUDIENCE) return error(cb, 'Room full'); const p = { id: s.id, name, robot: audience ? '👀' : '❔', score: 0, connected: true, submitted: false, lines: [], voiceId: null, voiceOwner: null }; (audience ? r.audience : r.players).push(p); s.data = { code: r.code, role: audience ? 'audience' : 'player' }; s.join(r.code); cb?.({ ok: true, id: s.id, role: s.data.role, code: r.code }); publish(r); });
+  s.on('host:start', (_, cb) => { const r = rooms.get(s.data.code); if (!r || r.host !== s.id) return error(cb, 'Only host can start'); if (r.phase !== 'lobby' || r.players.length < 1) return error(cb, 'Need at least 1 player in lobby'); r.aiEnabled = !!_?.ai; if (r.players.length % 2 && r.aiEnabled) { r.players.push({ id: 'ai-' + crypto.randomUUID(), name: 'MC BYTE', robot: '❔', ai: true, score: 0, connected: true, submitted: true, lines: [], voiceId: null, voiceOwner: null }); } if (r.players.length < 2) return error(cb, 'Need 2 players, or enable AI challenger'); assignVoices(r); dealCards(r); cb?.({ ok: true }); });
   s.on('host:rendered', (data, cb) => { const r = rooms.get(s.data.code); if (!r || r.host !== s.id || r.phase !== 'rendering') return error(cb, 'Not rendering'); const ms = Math.min(300000, Math.max(45000, (Number(data?.durationMs) || 0) + 20000)); beginVoting(r, ms); cb?.({ ok: true }); });
   s.on('submit', (data, cb) => { const r = rooms.get(s.data.code), p = r && player(r, s.id); if (!p || r.phase !== 'writing') return error(cb, 'Not writing now'); if (p.submitted) return error(cb, 'Already submitted'); if (!Array.isArray(data?.fills) || data.fills.length !== 2 || !Array.isArray(data?.customs) || data.customs.length !== 2) return error(cb, 'Fill in both words and write both bars'); const fills = data.fills.map(x => safe(x, 24)), customs = data.customs.map(x => safe(x, 100)); if (fills.some(x => x.length < 1)) return error(cb, 'Fill in both blanks'); if (customs.some(x => x.length < 3)) return error(cb, 'Both of your own bars need at least 3 characters'); p.lines = [fillBar(p.prompts[0], fills[0]), customs[0], fillBar(p.prompts[1], fills[1]), customs[1]]; p.submitted = true; cb?.({ ok: true }); publish(r); if (r.players.every(x => x.submitted)) startBattle(r); });
-  s.on('vote', (data, cb) => { const r = rooms.get(s.data.code); if (!r || r.phase !== 'voting' || s.data.role === 'host') return error(cb, 'Voting closed'); if (r.votes.has(s.id)) return error(cb, 'Already voted'); if (!r.players.some(p => p.id === data?.id) || data.id === s.id) return error(cb, 'Invalid vote'); r.votes.set(s.id, data.id); cb?.({ ok: true }); const voters = [...r.players, ...r.audience].filter(p => p.connected); if (r.votes.size >= voters.length - Number(r.players.some(p => !p.connected))) finishVoting(r); });
+  s.on('vote', (data, cb) => { const r = rooms.get(s.data.code); if (!r || r.phase !== 'voting' || s.data.role === 'host') return error(cb, 'Voting closed'); if (r.votes.has(s.id)) return error(cb, 'Already voted'); if (!r.players.some(p => p.id === data?.id) || data.id === s.id) return error(cb, 'Invalid vote'); r.votes.set(s.id, data.id); cb?.({ ok: true }); const voters = [...r.players, ...r.audience].filter(p => p.connected && !p.ai); if (r.votes.size >= voters.length) finishVoting(r); });
   s.on('host:next', (_, cb) => { const r = rooms.get(s.data.code); if (!r || r.host !== s.id || r.phase !== 'results') return error(cb, 'Cannot advance'); if (r.round >= r.maxRounds) { r.phase = 'finished'; r.finishedAt = Date.now(); r.champion = [...r.players].sort((a, b) => b.score - a.score)[0]?.name; publish(r); } else startRound(r); cb?.({ ok: true }); });
-  s.on('disconnect', () => { const r = rooms.get(s.data.code); if (!r) return; if (s.data.role === 'host') { cleanup(r); return; } const p = all(r).find(x => x.id === s.id); if (!p) return; if (r.phase === 'lobby') { r.players = r.players.filter(x => x.id !== s.id); r.audience = r.audience.filter(x => x.id !== s.id); } else p.connected = false; publish(r); });
+  s.on('disconnect', () => { const r = rooms.get(s.data.code); if (!r) return; if (s.data.role === 'host') { cleanup(r); return; } const p = all(r).find(x => x.id === s.id); if (!p) return; if (r.phase === 'lobby') { r.players = r.players.filter(x => x.id !== s.id); r.audience = r.audience.filter(x => x.id !== s.id); } else { p.connected = false; if (s.data.role === 'player' && r.phase !== 'finished') { timers(r); r.phase = 'finished'; r.deadline = 0; r.finishedAt = Date.now(); const remaining = r.players.filter(x => x.connected && !x.ai); r.champion = (remaining.sort((a,b) => b.score-a.score)[0] || r.players.find(x => x.ai))?.name || 'No winner'; r.finishReason = `${p.name} disconnected. The remaining player wins by forfeit.`; } } publish(r); });
 });
 setInterval(() => { for (const r of rooms.values()) if (r.phase === 'finished' && r.finishedAt && Date.now() - r.finishedAt > 3600000) cleanup(r); }, 60000).unref();
 http.listen(PORT, '0.0.0.0', () => console.log(`Robo Rhyme Royale running on :${PORT}`));

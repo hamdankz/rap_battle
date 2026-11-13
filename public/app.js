@@ -26,13 +26,16 @@ function render() {
   $('phaseLabel').textContent = state.phase.toUpperCase() + ' • ROUND ' + state.round + '/' + state.maxRounds;
   const c = $('content'); const players = state.players; const me = players.find(p => p.id === self); let html = '';
   if (state.phase === 'lobby') {
-    html = `<div class="arena"><p>JOIN ON YOUR PHONE</p><div class="code">${state.code}</div><p>${esc(location.origin)} • Enter this room code</p><div class="roster">${players.map(bot).join('')}</div><p>${players.length}/8 rappers • ${state.audience} audience members</p>${role === 'host' ? `<button id="start" ${players.length < 2 ? 'disabled' : ''}>START BATTLE</button> <button id="test" class="secondary">🔊 TEST SOUND</button>` : '<p class="status">Waiting for host to start...</p>'}</div>`;
+    html = `<div class="arena"><p>JOIN ON YOUR PHONE</p><div class="code">${state.code}</div><p>${esc(location.origin)} • Enter this room code</p><div class="roster">${players.map(bot).join('')}</div><p>${players.length}/8 rappers • ${state.audience} audience members</p>${role === 'host' ? `<label class="ai-option"><input type="checkbox" id="aiToggle"> Add AI challenger when player count is odd</label><button id="start" ${players.length < 1 ? 'disabled' : ''}>START BATTLE</button> <button id="test" class="secondary">🔊 TEST SOUND</button>` : '<p class="status">Waiting for host to start...</p>'}</div>`;
+  }
+  if (state.phase === 'cards') {
+    html = `<div class="arena"><h1>🃏 MYSTERY MC CARDS</h1><p>Every MC has been dealt a random card. Identities stay hidden until the rap begins!</p><div class="timer" id="timer"></div><div class="roster">${(state.mcCards || []).map((card, i) => `<div class="bot secret-card"><div class="face">${esc(card)}</div><strong>MC ???</strong><small>Card ${i + 1}</small></div>`).join('')}</div></div>`;
   }
   if (state.phase === 'writing') {
-    html = `<div class="arena"><h1>✍️ WRITE 4 BARS</h1><p class="status">🥁 ${esc(state.beat?.name || '')} • about ${sylTarget()} syllables per bar</p><div class="timer" id="timer"></div>${role === 'player' && !me?.submitted ? barsForm() : `<p class="status">${role === 'host' ? 'Players are writing their verses...' : me?.submitted ? 'Your lyrics are locked in!' : 'Waiting for rappers...'}</p>`}<div class="roster">${players.map(p => `<div class="bot">${esc(p.robot)} ${esc(p.name)} ${p.submitted ? '✅' : '✍️'}</div>`).join('')}</div></div>`;
+    html = `<div class="arena"><h1>✍️ WRITE 4 BARS</h1><p class="status">🥁 ${esc(state.beat?.name || '')} • about ${sylTarget()} syllables per bar</p><div class="timer" id="timer"></div>${role === 'player' && !me?.submitted ? barsForm() : `<p class="status">${role === 'host' ? 'Players are writing their verses...' : me?.submitted ? 'Your lyrics are locked in!' : 'Waiting for rappers...'}</p>`}<div class="roster">${players.map(p => `<div class="bot">${esc(p.robot)} MC ??? ${p.submitted ? '✅' : '✍️'}</div>`).join('')}</div></div>`;
   }
   if (state.phase === 'rendering') {
-    html = `<div class="arena"><h1>🎛️ IN THE STUDIO</h1><p class="status">${role === 'host' ? 'Recording the mystery voices over the beat…' : 'The host is mixing the battle. Hang tight!'}</p><p class="muted" id="renderProgress">${esc(renderMsg)}</p><div class="roster">${players.map(p => `<div class="bot">${esc(p.robot)} ${esc(p.name)}</div>`).join('')}</div></div>`;
+    html = `<div class="arena"><h1>🎛️ IN THE STUDIO</h1><p class="status">${role === 'host' ? 'Recording the mystery voices over the beat…' : 'The host is mixing the battle. Hang tight!'}</p><p class="muted" id="renderProgress">${esc(renderMsg)}</p><div class="roster">${players.map(p => `<div class="bot">${esc(p.robot)} MC ???</div>`).join('')}</div></div>`;
   }
   if (state.phase === 'voting') {
     html = `<div class="arena"><h1>🎤 THE RAP SHOWDOWN</h1><p class="status">🥁 ${esc(state.beat?.name || '')}</p><div class="timer" id="timer"></div><div class="battle">${(state.battle || []).map(p => `<div class="bot"><div class="face">${esc(p.robot)}</div><strong>${esc(p.name)}</strong>${state.hasVoices ? '<small>🎭 mystery voice</small>' : ''}<div class="lyrics">${p.lines.map((l, i) => `<p data-k="${esc(p.id)}:${i}">${esc(l)}</p>`).join('')}</div></div>`).join('')}</div>${role === 'host' ? `<p class="muted">Turn up the sound! Players vote on their phones.</p>${Beat.ctx && Beat.ctx.state !== 'running' ? '<button id="unmute">🔊 TAP TO ENABLE SOUND</button>' : ''}` : voted ? '<p class="status">Vote received!</p>' : `<p>VOTE FOR YOUR FAVORITE (NOT YOURSELF)</p><div class="votegrid">${players.filter(p => p.id !== self).map(p => `<button data-vote="${esc(p.id)}">${esc(p.robot)} ${esc(p.name)}</button>`).join('')}</div>`}</div>`;
@@ -44,10 +47,10 @@ function render() {
   if (state.phase === 'finished') {
     const winner = players.find(p => p.name === state.champion);
     const reveal = state.reveal?.length ? `<h2>🎭 THE VOICE REVEAL</h2><div class="roster">${state.reveal.map(x => `<div class="bot"><div class="face">${esc(x.robot)}</div><strong>${esc(x.name)}</strong><small>was ${esc(x.voice)}'s voice</small></div>`).join('')}</div>` : '';
-    html = `<div class="arena"><h1>👑 CHAMPION</h1><div class="hero">${esc(winner?.robot || '🤖')}</div><h1>${esc(state.champion)}</h1><div class="roster">${[...players].sort((a, b) => b.score - a.score).map(bot).join('')}</div>${reveal}<p>Refresh to start a new party!</p></div>`;
+    html = `<div class="arena"><h1>👑 CHAMPION</h1><div class="hero">${esc(winner?.robot || '🤖')}</div><h1>${esc(state.champion)}</h1><div class="roster">${[...players].sort((a, b) => b.score - a.score).map(bot).join('')}</div>${reveal}${state.finishReason ? `<p class="status">${esc(state.finishReason)}</p>` : ''}<p>Refresh to start a new party!</p></div>`;
   }
   c.innerHTML = html;
-  if ($('start')) $('start').onclick = () => { Beat.init().resume(); send('host:start', {}); };
+  if ($('start')) $('start').onclick = () => { Beat.init().resume(); send('host:start', { ai: !!$('aiToggle')?.checked }); };
   if ($('next')) $('next').onclick = () => send('host:next', {});
   if ($('submit')) $('submit').onclick = () => send('submit', { fills: [draft.fill1, draft.fill2], customs: [draft.cus1, draft.cus2] }, () => { });
   ['fill1', 'cus1', 'fill2', 'cus2'].forEach(k => { const el = $(k); if (el) el.oninput = () => { draft[k] = el.value; updateSyl(); }; });
@@ -100,9 +103,9 @@ function calibrateSpeech() {
     u.onerror = () => res(); speechSynthesis.speak(u); setTimeout(res, 8000);
   });
 }
-function speakFit(text, pitch, barSec) {
+function speakFit(text, pitch, barSec, onstart) {
   const rate = Math.min(2, Math.max(0.6, (Math.max(1, countSyl(text)) * msPerSyl / 1000) / (barSec * 0.88)));
-  speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.pitch = pitch; u.rate = rate; speechSynthesis.speak(u);
+  speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.pitch = pitch; u.rate = rate; if (onstart) u.onstart = onstart; speechSynthesis.speak(u);
 }
 async function prepareBattle(s) {
   const key = s.code + ':' + s.round; if (preparedKey === key) return; preparedKey = key; plan = null;
@@ -122,7 +125,7 @@ async function prepareBattle(s) {
     clips.push({ p, idx, line, buf });
   }
   // Every line is ONE rapped bar. The first bar is an instrumental intro.
-  const st = s.beat, mBar = 240 / st.bpm, rapBar = barSecOf(st); let bars = st.lineBars; const items = [];
+  const st = s.beat, mBar = 240 / st.bpm, rapBar = barSecOf(st); let bars = 0; const items = [];
   for (const c of clips) {
     if (c.buf) {
       const rate = Math.min(1.3, Math.max(0.85, c.buf.dur / (rapBar * 0.92))); // stretch the voice to fill its bar
@@ -135,18 +138,38 @@ async function prepareBattle(s) {
 }
 function perform(s) {
   if (!plan || performedKey === plan.key) return; performedKey = plan.key;
-  const ctx = Beat.init(); const t0 = Beat.start(plan.beat.name);
-  for (const it of plan.items) {
-    const when = t0 + it.startBar * plan.bar, delay = Math.max(0, (when - ctx.currentTime) * 1000);
-    if (it.buf) {
-      const src = ctx.createBufferSource(); src.buffer = it.buf.buf; src.playbackRate.value = it.rate; src.connect(Beat.vocal);
-      src.start(when, it.buf.offset, it.buf.dur); playing.push(src);
-    } else if ('speechSynthesis' in window) {
-      timeouts.push(setTimeout(() => speakFit(it.line, it.p.robot === '👾' ? 0.65 : 1.3, plan.rapBar), Math.max(0, delay - 120)));
+  const ctx = Beat.init();
+  const first = plan.items[0];
+  // Audio-buffer voices and the beat use the SAME AudioContext clock.
+  // Browser speech has no scheduled-start API, so its first onstart callback
+  // starts the beat instead; later bars use the resulting clock anchor.
+  const fallbackFirst = first && !first.buf;
+  const startAt = fallbackFirst ? null : Beat.start(plan.beat.name);
+  function scheduleRest(t0, skipFirst) {
+    for (const [index, it] of plan.items.entries()) {
+      if (skipFirst && index === 0) continue;
+      const when = t0 + it.startBar * plan.bar;
+      const delay = Math.max(0, (when - ctx.currentTime) * 1000);
+      if (it.buf) {
+        const src = ctx.createBufferSource(); src.buffer = it.buf.buf;
+        src.playbackRate.value = it.rate; src.connect(Beat.vocal);
+        src.start(Math.max(when, ctx.currentTime + 0.01), it.buf.offset, it.buf.dur); playing.push(src);
+      } else if ('speechSynthesis' in window) {
+        timeouts.push(setTimeout(() => speakFit(it.line, it.p.robot === '👾' ? 0.65 : 1.3, plan.rapBar), delay));
+      }
+      timeouts.push(setTimeout(() => {
+        document.querySelectorAll('.lyrics p.now').forEach(e => e.classList.remove('now'));
+        document.querySelector(`[data-k="${it.p.id}:${it.idx}"]`)?.classList.add('now');
+      }, delay));
     }
-    // light up the bar being rapped
-    timeouts.push(setTimeout(() => { document.querySelectorAll('.lyrics p.now').forEach(e => e.classList.remove('now')); document.querySelector(`[data-k="${it.p.id}:${it.idx}"]`)?.classList.add('now'); }, delay));
   }
+  if (fallbackFirst && 'speechSynthesis' in window) {
+    speakFit(first.line, first.p.robot === '👾' ? 0.65 : 1.3, plan.rapBar, () => {
+      const t0 = Beat.start(plan.beat.name, ctx.currentTime + 0.02);
+      document.querySelector(`[data-k="${first.p.id}:${first.idx}"]`)?.classList.add('now');
+      scheduleRest(t0, true);
+    });
+  } else if (startAt !== null) scheduleRest(startAt, false);
 }
 function stopShow() {
   playing.forEach(x => { try { x.stop(); } catch { } }); playing = [];

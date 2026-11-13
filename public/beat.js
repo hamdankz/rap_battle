@@ -36,10 +36,10 @@ window.Beat = (() => {
       next += stepDur(); step++;
     }
   }
-  function start(name) {
+  function start(name, atTime) {
     init(); stop(); ctx.resume();
     cfg = STYLES[name] || STYLES['Boom Bap'];
-    step = 0; next = ctx.currentTime + 0.3;
+    step = 0; next = atTime ?? (ctx.currentTime + 0.3);
     const t0 = next;
     timer = setInterval(schedule, 25);
     return t0; // audio-clock time of bar 0
