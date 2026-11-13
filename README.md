@@ -57,3 +57,13 @@ The voice list on `/record.html` shows who recorded, so keep that page to the ho
 - Beat and prerecorded vocal clips now share the same Web Audio clock, starting with the first performed bar (no instrumental intro). When browser speech synthesis is used instead, the beat starts on the first utterance's `onstart` event; browser TTS cannot guarantee sample-accurate timing.
 
 To update Render, replace the repository files and commit; Render normally redeploys automatically.
+
+## MC Library (new)
+
+Open `/library.html` from the game homepage. In Render > your Web Service > Environment, add an environment variable `MC_ADMIN_KEY` with a long random password, save, and redeploy. Enter that password in the library page to list preset and recorded MCs, rename them, change their emoji, enable/disable them, and preview custom voice recordings. Never share the key with players.
+
+Preset MCs are game character cards, **not** recorded voice samples. Custom MCs are created via `/record.html` and stored in the server's `voices/` folder. Enabled custom voices are eligible for random voice assignment; enabled MC cards are eligible for the mystery-card display. Editing an MC doesn't change the underlying recorded voice. Library settings are saved in `voices/mc-library.json` and `voices/index.json`. On Render's ephemeral filesystem, voice recordings and settings can disappear on redeploy/restart; configure persistent disk storage or move data to durable storage for long-term use. The recording upload and deletion endpoints are inherited from the original game and **are not admin-protected**: do not expose voice recording to untrusted users until you add authentication. A recording preview plays the original voice memo, not a generated rap.
+
+### GitHub update
+
+Use GitHub Desktop (recommended): clone your existing repository, copy the **contents** of this ZIP into the cloned repository folder (not a nested folder), accept replacement of existing files, commit and push. Or on GitHub web, upload the root files at repository root, and upload `public/library.html` and `public/index.html` inside the existing `public` folder, plus `server.js` at root. You only need these three changed files for the MC Library. The other files in the ZIP are included for completeness. Render normally redeploys automatically after a push.

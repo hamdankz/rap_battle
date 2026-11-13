@@ -33,7 +33,22 @@ const BEATS = [
   { name: 'UK Drill', bpm: 142, lineBars: 2 },
 ];
 
-const MC_CARDS = ['🤖','👾','🦾','🛸','⚡','🔩','🧠','🚀'];
+const DEFAULT_MCS = [
+  ['circuit','Circuit King','🤖'],['glitch','Glitch Witch','👾'],
+  ['chrome','Chrome Dome','🦾'],['cosmo','Cosmo Flow','🛸'],
+  ['volt','DJ Voltage','⚡'],['bolt','Big Bolt','🔩'],
+  ['brain','Brainwave','🧠'],['rocket','Rocket Rhymes','🚀']
+].map(([id,name,emoji]) => ({id,name,emoji,enabled:true}));
+const MC_INDEX = path.join(VOICES_DIR, 'mc-library.json');
+const loadMcSettings = () => { try { return JSON.parse(fs.readFileSync(MC_INDEX,'utf8')); } catch { return {}; } };
+const saveMcSettings = v => fs.writeFileSync(MC_INDEX, JSON.stringify(v,null,2));
+const presetMcs = () => DEFAULT_MCS.map(mc => ({...mc,...(loadMcSettings()[mc.id] || {}),type:'preset'}));
+const customMcs = () => loadVoices().map(v => ({id:v.id,name:v.mcName || v.owner,owner:v.owner,emoji:v.emoji || '🎤',enabled:v.enabled !== false,type:'custom',createdAt:v.createdAt}));
+const mcLibrary = () => [...presetMcs(),...customMcs()];
+const adminKey = process.env.MC_ADMIN_KEY;
+const isAdmin = req => !!adminKey && req.get('X-MC-Admin-Key') === adminKey;
+const requireAdmin = (req,res,next) => isAdmin(req) ? next() : res.status(401).json({error:'Admin key required. Set MC_ADMIN_KEY on Render.'});
+
 const AI_LINES = [['My CPU is blazing, I am taking the crown','Your tiny little speakers cannot handle my sound','I am made of metal, I was built for the show','You are running on batteries, I am stealing the flow'],['I entered the arena with a laser-bright grin','Your rusty old firmware never stood a chance to win','My motherboard is golden, every rhyme is elite','Now reboot your whole system and get off of my beat']];
 const prompts = ['I rolled into the club with a pocket of ___', 'Your robot is so rusty it smells like ___', 'My rhymes hit harder than a flying ___', 'I stole your batteries and bought a ___', 'My circuits are hotter than a ___', 'You call that a rap? Sounds like a ___', 'I upgraded my brain with a giant ___', 'Your dance moves look like a broken ___'];
 const safe = (s, n = 80) => String(s ?? '').replace(/[<>\u0000-\u001f]/g, '').trim().slice(0, n);
@@ -59,7 +74,7 @@ const cleanup = r => { timers(r); rooms.delete(r.code); io.to(r.code).emit('clos
 
 // Secretly deal a random household voice to every player (never their own, when names match)
 function assignVoices(r) {
-  const voices = loadVoices();
+  const voices = loadVoices().filter(v => v.enabled !== false);
   r.hasVoices = voices.length > 0;
   const pool = shuffle(voices);
   const used = new Set();
@@ -74,7 +89,10 @@ function assignVoices(r) {
 
 function dealCards(r) {
   timers(r); r.phase = 'cards'; r.deadline = Date.now() + 12000;
-  r.mcCards = shuffle(MC_CARDS);
+  const available = mcLibrary().filter(mc => mc.enabled);
+  const cards = available.length ? available : DEFAULT_MCS;
+  r.mcCards = shuffle([...cards.map(mc => mc.emoji)]);
+  while (r.mcCards.length < r.players.length) r.mcCards.push(...shuffle(cards.map(mc => mc.emoji)));
   r.players.forEach((p, i) => { p.robot = r.mcCards[i]; });
   publish(r); r.timer = setTimeout(() => startRound(r), 12000);
 }
@@ -136,6 +154,29 @@ app.delete('/api/voices/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// ---- MC Library: admin-managed; custom recordings remain server-side ----
+app.get('/api/mcs', requireAdmin, (_req,res) => res.json(mcLibrary()));
+app.patch('/api/mcs/:id', requireAdmin, (req,res) => {
+  const id = String(req.params.id);
+  const name = safe(req.body?.name, 30);
+  const emoji = safe(req.body?.emoji, 12);
+  const enabled = req.body?.enabled;
+  if (!name || !emoji || typeof enabled !== 'boolean') return res.status(400).json({error:'Name, emoji and enabled required'});
+  if (DEFAULT_MCS.some(x => x.id === id)) {
+    const settings = loadMcSettings(); settings[id] = {name,emoji,enabled}; saveMcSettings(settings);
+  } else {
+    const voices = loadVoices(); const v = voices.find(x => x.id === id);
+    if (!v) return res.status(404).json({error:'MC not found'});
+    v.mcName = name; v.emoji = emoji; v.enabled = enabled; saveVoices(voices);
+  }
+  res.json({ok:true});
+});
+app.get('/api/mcs/:id/preview', requireAdmin, (req,res) => {
+  const v = loadVoices().find(x => x.id === req.params.id);
+  if (!v) return res.status(404).json({error:'Recording not found (presets use browser voices)'});
+  res.set('Cache-Control','no-store');
+  res.type('audio/wav').sendFile(path.join(VOICES_DIR, v.id + '.wav'));
+});
 // ---- Synthesis: forwards to the local voice adapter (see adapter/xtts_adapter.py) ----
 // The browser only sends {code, pid, text}; the secret voice id never leaves the server.
 app.post('/api/voice', async (req, res) => {
