@@ -21,7 +21,7 @@ Deploy this project as a **Node.js web service** (not static hosting) with `npm 
 
 ## Game rules
 
-2–8 rappers, up to 30 audience members. Three rounds. Each rapper writes two lines (90 seconds), then the host performs each rap with audio, and all connected players/audience can vote for a different rapper (65 seconds). Each vote awards 100 points. Host advances rounds and reveals champion.
+2–8 rappers, up to 30 audience members. Three rounds, each on a different beat (Boom Bap, Trap, UK Drill). Each rapper writes 4 bars in 120 seconds: two times (fill in the last word of a prompt bar, then write your own bar that rhymes with it), with a live syllable counter. The host performs each rap with audio, one bar per line, and all connected players/audience vote for a different rapper (65+ seconds). Each vote awards 100 points. Host advances rounds and reveals champion.
 
 ## VoiceStudio
 

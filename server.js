@@ -25,16 +25,18 @@ const loadVoices = () => { try { return JSON.parse(fs.readFileSync(INDEX, 'utf8'
 const saveVoices = v => fs.writeFileSync(INDEX, JSON.stringify(v, null, 1));
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-// Beat styles rotate each round. Must match public/beat.js
+// Beat styles rotate each round. Must match public/beat.js.
+// lineBars = musical bars that make up ONE rapped bar (trap/drill are half-time, so 2).
 const BEATS = [
-  { name: 'Boom Bap', bpm: 88, lineBars: 2 },
-  { name: 'Trap', bpm: 140, lineBars: 4 },
-  { name: 'UK Drill', bpm: 142, lineBars: 4 },
+  { name: 'Boom Bap', bpm: 88, lineBars: 1 },
+  { name: 'Trap', bpm: 140, lineBars: 2 },
+  { name: 'UK Drill', bpm: 142, lineBars: 2 },
 ];
 
 const prompts = ['I rolled into the club with a pocket of ___', 'Your robot is so rusty it smells like ___', 'My rhymes hit harder than a flying ___', 'I stole your batteries and bought a ___', 'My circuits are hotter than a ___', 'You call that a rap? Sounds like a ___', 'I upgraded my brain with a giant ___', 'Your dance moves look like a broken ___'];
 const safe = (s, n = 80) => String(s ?? '').replace(/[<>\u0000-\u001f]/g, '').trim().slice(0, n);
 const code = () => { let c; do { c = Array.from(crypto.randomBytes(4), x => 'ABCDEFGHJKLMNPQRSTUVWXYZ'[x % 24]).join(''); } while (rooms.has(c)); return c; };
+const fillBar = (pr, w) => (pr.includes('___') ? pr.replace('___', w) : `${pr} ${w}`);
 const player = (r, id) => r.players.find(p => p.id === id);
 const all = r => [...r.players, ...r.audience];
 const shuffle = a => { a = [...a]; for (let i = a.length - 1; i > 0; i--) { const j = crypto.randomInt(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
@@ -69,19 +71,20 @@ function assignVoices(r) {
 }
 
 function startRound(r) {
-  timers(r); r.round++; r.phase = 'writing'; r.deadline = Date.now() + 90000; r.results = null; r.battle = null;
+  timers(r); r.round++; r.phase = 'writing'; r.deadline = Date.now() + 120000; r.results = null; r.battle = null;
   r.beat = BEATS[(r.round - 1) % BEATS.length];
   for (const p of r.players) {
     p.submitted = false; p.lines = [];
-    io.to(p.id).emit('prompt', { prompts: [prompts[(r.round * 3 + r.players.indexOf(p)) % prompts.length], prompts[(r.round * 3 + r.players.indexOf(p) + 4) % prompts.length]] });
+    p.prompts = [prompts[(r.round * 3 + r.players.indexOf(p)) % prompts.length], prompts[(r.round * 3 + r.players.indexOf(p) + 4) % prompts.length]];
+    io.to(p.id).emit('prompt', { prompts: p.prompts });
   }
-  publish(r); r.timer = setTimeout(() => startBattle(r), 90000);
+  publish(r); r.timer = setTimeout(() => startBattle(r), 120000);
 }
 // Writing is over: host renders the voices over the beat, then calls beginVoting
 function startBattle(r) {
   if (r.phase !== 'writing') return; timers(r);
   r.phase = 'rendering'; r.deadline = 0;
-  r.battle = r.players.map(p => ({ id: p.id, name: p.name, robot: p.robot, lines: p.lines?.length === 2 ? p.lines : ['My circuits crackle with a thunderous beat', 'Your rhymes are weak, accept defeat'] }));
+  r.battle = r.players.map(p => ({ id: p.id, name: p.name, robot: p.robot, lines: p.lines?.length === 4 ? p.lines : ['My circuits crackle with a thunderous beat', 'Your rhymes are weak, accept defeat', 'I never skip a bar, I never miss a rhyme', 'Bow down to the bot, it is rapping time'] }));
   publish(r); r.timer = setTimeout(() => beginVoting(r, 90000), 300000); // safety net if host stalls
 }
 function beginVoting(r, ms) {
@@ -157,7 +160,7 @@ io.on('connection', s => {
   s.on('join', (data, cb) => { if (s.data.code) return error(cb, 'Already joined'); const r = rooms.get(safe(data?.code, 4).toUpperCase()); if (!r) return error(cb, 'Room not found'); const name = safe(data?.name, 18); if (name.length < 2) return error(cb, 'Enter a name (2–18 characters)'); if (r.phase !== 'lobby') return error(cb, 'This game has already started'); if (all(r).some(p => p.name.toLowerCase() === name.toLowerCase())) return error(cb, 'Name already taken'); const audience = r.players.length >= MAX_PLAYERS; if (audience && r.audience.length >= MAX_AUDIENCE) return error(cb, 'Room full'); const p = { id: s.id, name, robot: audience ? '👀' : ['🤖', '👾', '🦾', '🛸', '⚡', '🔩', '🧠', '🚀'][r.players.length], score: 0, connected: true, submitted: false, lines: [], voiceId: null, voiceOwner: null }; (audience ? r.audience : r.players).push(p); s.data = { code: r.code, role: audience ? 'audience' : 'player' }; s.join(r.code); cb?.({ ok: true, id: s.id, role: s.data.role, code: r.code }); publish(r); });
   s.on('host:start', (_, cb) => { const r = rooms.get(s.data.code); if (!r || r.host !== s.id) return error(cb, 'Only host can start'); if (r.phase !== 'lobby' || r.players.length < 2) return error(cb, 'Need at least 2 players in lobby'); assignVoices(r); startRound(r); cb?.({ ok: true }); });
   s.on('host:rendered', (data, cb) => { const r = rooms.get(s.data.code); if (!r || r.host !== s.id || r.phase !== 'rendering') return error(cb, 'Not rendering'); const ms = Math.min(300000, Math.max(45000, (Number(data?.durationMs) || 0) + 20000)); beginVoting(r, ms); cb?.({ ok: true }); });
-  s.on('submit', (data, cb) => { const r = rooms.get(s.data.code), p = r && player(r, s.id); if (!p || r.phase !== 'writing') return error(cb, 'Not writing now'); if (p.submitted) return error(cb, 'Already submitted'); if (!Array.isArray(data?.lines) || data.lines.length !== 2) return error(cb, 'Submit two lines'); const lines = data.lines.map(x => safe(x, 130)); if (lines.some(x => x.length < 3)) return error(cb, 'Both lines need at least 3 characters'); p.lines = lines; p.submitted = true; cb?.({ ok: true }); publish(r); if (r.players.every(x => x.submitted)) startBattle(r); });
+  s.on('submit', (data, cb) => { const r = rooms.get(s.data.code), p = r && player(r, s.id); if (!p || r.phase !== 'writing') return error(cb, 'Not writing now'); if (p.submitted) return error(cb, 'Already submitted'); if (!Array.isArray(data?.fills) || data.fills.length !== 2 || !Array.isArray(data?.customs) || data.customs.length !== 2) return error(cb, 'Fill in both words and write both bars'); const fills = data.fills.map(x => safe(x, 24)), customs = data.customs.map(x => safe(x, 100)); if (fills.some(x => x.length < 1)) return error(cb, 'Fill in both blanks'); if (customs.some(x => x.length < 3)) return error(cb, 'Both of your own bars need at least 3 characters'); p.lines = [fillBar(p.prompts[0], fills[0]), customs[0], fillBar(p.prompts[1], fills[1]), customs[1]]; p.submitted = true; cb?.({ ok: true }); publish(r); if (r.players.every(x => x.submitted)) startBattle(r); });
   s.on('vote', (data, cb) => { const r = rooms.get(s.data.code); if (!r || r.phase !== 'voting' || s.data.role === 'host') return error(cb, 'Voting closed'); if (r.votes.has(s.id)) return error(cb, 'Already voted'); if (!r.players.some(p => p.id === data?.id) || data.id === s.id) return error(cb, 'Invalid vote'); r.votes.set(s.id, data.id); cb?.({ ok: true }); const voters = [...r.players, ...r.audience].filter(p => p.connected); if (r.votes.size >= voters.length - Number(r.players.some(p => !p.connected))) finishVoting(r); });
   s.on('host:next', (_, cb) => { const r = rooms.get(s.data.code); if (!r || r.host !== s.id || r.phase !== 'results') return error(cb, 'Cannot advance'); if (r.round >= r.maxRounds) { r.phase = 'finished'; r.finishedAt = Date.now(); r.champion = [...r.players].sort((a, b) => b.score - a.score)[0]?.name; publish(r); } else startRound(r); cb?.({ ok: true }); });
   s.on('disconnect', () => { const r = rooms.get(s.data.code); if (!r) return; if (s.data.role === 'host') { cleanup(r); return; } const p = all(r).find(x => x.id === s.id); if (!p) return; if (r.phase === 'lobby') { r.players = r.players.filter(x => x.id !== s.id); r.audience = r.audience.filter(x => x.id !== s.id); } else p.connected = false; publish(r); });
