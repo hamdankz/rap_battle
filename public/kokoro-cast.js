@@ -44,31 +44,15 @@
       if (!loading) {
         loading = (async () => {
           notify({ status: 'loading', message: 'Loading Kokoro voice engine' });
-          // Some Safari/browser +esm dependency builds fail with
-          // `self is not an Object (evaluating '"caches" in self')`.
-          // Try a separately bundled CDN if the first route fails.
-          const sources = [
-            'https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/+esm',
-            'https://esm.sh/kokoro-js@1.2.1?bundle'
-          ];
-          let instance, lastError;
-          for (const source of sources) {
-            try {
-              notify({ status: 'loading', message: 'Loading voice engine from ' + new URL(source).host });
-              const { KokoroTTS } = await import(source);
-              if (!KokoroTTS) throw new Error('KokoroTTS export missing');
-              instance = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', {
-                dtype: 'q8',
-                device: 'wasm',
-                progress_callback: (progress) => notify(progress)
-              });
-              break;
-            } catch (error) {
-              lastError = error;
-              console.warn('Kokoro loading attempt failed:', source, error);
-            }
-          }
-          if (!instance) throw new Error('Both browser model loaders failed: ' + (lastError?.message || 'unknown error'));
+          // Load the locally bundled browser module instead of a CDN re-bundle.
+          // The CDN variants were producing a broken `self` binding in Safari.
+          const { KokoroTTS } = await import('/vendor/kokoro-engine.js');
+          if (typeof KokoroTTS?.from_pretrained !== 'function') throw new Error('Bundled Kokoro engine is unavailable');
+          const instance = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', {
+            dtype: 'q8',
+            device: 'wasm',
+            progress_callback: (progress) => notify(progress)
+          });
           tts = instance;
           notify({ status: 'ready', message: 'Kokoro voices ready' });
           return instance;

@@ -21,7 +21,7 @@ async function preview(mc, name, button, index){
       previewAudio=new Audio(previewUrl);
       $('notice').textContent=`${name}: playing original recording. Custom voice cloning is not yet available for this preview sentence.`;
     } else {
-      const voice=window.KokoroCast.voiceFor(index);
+      const voice=window.KokoroCast.voiceFor(['circuit','glitch','chrome','cosmo','volt','bolt','brain','rocket'].indexOf(mc.id) >= 0 ? ['circuit','glitch','chrome','cosmo','volt','bolt','brain','rocket'].indexOf(mc.id) : index);
       const blob=await window.KokoroCast.speakWav(phrase,voice.id);
       previewUrl=URL.createObjectURL(blob);
       previewAudio=new Audio(previewUrl);
@@ -65,7 +65,7 @@ async function load(){
    play.onclick=()=>preview(mc,name.value,play,thisIndex);
    card.append(face,title,name,emoji,label,save,play);
    const note=document.createElement('p');note.className='muted';
-   note.textContent=mc.type==='preset'?'Preview: “Hey! My name is [MC name] and this is my voice!”':'Recorded by: '+mc.owner+' • Preview plays the original recording; it cannot yet generate the introduction in the recorded voice.';
+   note.textContent=mc.type==='preset'?'Voice: '+window.KokoroCast.voiceFor(thisIndex).label+' • Preview: “Hey! My name is [MC name] and this is my voice!”':'Recorded by: '+mc.owner+' • Preview plays the original recording; it cannot yet generate the introduction in the recorded voice.';
    card.append(note);grid.append(card);
   }
  }catch(e){$('notice').textContent=e.message}

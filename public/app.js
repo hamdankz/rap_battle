@@ -19,7 +19,7 @@ socket.on('state', s => {
   if (role === 'host') { if (s.phase === 'rendering') prepareBattle(s); if (s.phase === 'voting') perform(s); }
 });
 
-const castVoice = (p, players) => window.KokoroCast.voiceFor(Math.max(0, players.findIndex(x => x.id === p.id)));
+const castVoice = (p, players) => window.KokoroCast.voiceFor(Math.max(0, ['circuit','glitch','chrome','cosmo','volt','bolt','brain','rocket'].indexOf(players.find(x => x.id === p.id)?.mcId)));
 const castLabel = (p, players) => castVoice(p, players).label;
 const bot = p => `<div class="bot"><div class="face">${esc(p.robot)}</div><strong>${esc(p.name)}</strong><small>${p.score || 0} pts</small></div>`;
 function render() {

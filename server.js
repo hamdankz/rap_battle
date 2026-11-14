@@ -65,7 +65,7 @@ const shuffle = a => { a = [...a]; for (let i = a.length - 1; i > 0; i--) { cons
 const publish = r => {
   io.to(r.code).emit('state', {
     code: r.code, phase: r.phase, round: r.round, maxRounds: r.maxRounds, hostConnected: r.hostConnected,
-    players: r.players.map(({ id, name, robot, score, connected, submitted }) => ({ id, name, robot, score, connected, submitted })),
+    players: r.players.map(({ id, name, robot, score, connected, submitted, mcId }) => ({ id, name, robot, score, connected, submitted, mcId })),
     audience: r.audience.length, deadline: r.deadline, battle: r.battle, results: r.results, champion: r.champion,
     beat: r.beat, hasVoices: r.hasVoices, voiceAdapterConfigured: !!process.env.VOICE_API_URL, mcCards: r.mcCards || [], aiEnabled: !!r.aiEnabled, finishReason: r.finishReason || null,
     // Voice owners stay secret until the game is over
