@@ -108,7 +108,7 @@ function startRound(r) {
 // Writing is over: host renders the voices over the beat, then calls beginVoting
 function startBattle(r) {
   if (r.phase !== 'writing') return; timers(r);
-  r.phase = 'rendering'; r.deadline = 0;
+  r.phase = 'rendering'; r.deadline = 0; r.hypeCount = 0;
   r.battle = r.players.map(p => ({ id: p.id, name: p.name, robot: p.robot, beat: p.beatOptions?.[p.beatChoice ?? 0] || BEATS[0], lines: p.lines?.length === 4 ? p.lines : ['My circuits crackle with a thunderous beat', 'Your rhymes are weak, accept defeat', 'I never skip a bar, I never miss a rhyme', 'Bow down to the bot, it is rapping time'] }));
   publish(r); r.timer = setTimeout(() => beginVoting(r, 90000), 300000); // safety net if host stalls
 }
@@ -212,6 +212,24 @@ io.on('connection', s => {
   s.on('host:create', (data, cb) => { if (s.data.code) return error(cb, 'Already in a room'); const c = code(); const r = { code: c, host: s.id, hostConnected: true, phase: 'lobby', round: 0, maxRounds: 3, players: [], audience: [], timer: null, deadline: 0, battle: null, results: null, champion: null, votes: new Map(), beat: null, hasVoices: false, aiEnabled: false, mcCards: [], finishReason: null }; rooms.set(c, r); s.data = { code: c, role: 'host' }; s.join(c); cb?.({ ok: true, code: c, token: crypto.randomUUID() }); publish(r); });
   s.on('join', (data, cb) => { if (s.data.code) return error(cb, 'Already joined'); const r = rooms.get(safe(data?.code, 4).toUpperCase()); if (!r) return error(cb, 'Room not found'); const name = safe(data?.name, 18); if (name.length < 2) return error(cb, 'Enter a name (2–18 characters)'); if (r.phase !== 'lobby') return error(cb, 'This game has already started'); if (all(r).some(p => p.name.toLowerCase() === name.toLowerCase())) return error(cb, 'Name already taken'); const audience = r.players.length >= MAX_PLAYERS; if (audience && r.audience.length >= MAX_AUDIENCE) return error(cb, 'Room full'); const p = { id: s.id, name, robot: audience ? '👀' : '❔', score: 0, connected: true, submitted: false, lines: [], voiceId: null, voiceOwner: null }; (audience ? r.audience : r.players).push(p); s.data = { code: r.code, role: audience ? 'audience' : 'player' }; s.join(r.code); cb?.({ ok: true, id: s.id, role: s.data.role, code: r.code }); publish(r); });
   s.on('host:start', (_, cb) => { const r = rooms.get(s.data.code); if (!r || r.host !== s.id) return error(cb, 'Only host can start'); if (r.phase !== 'lobby' || r.players.length < 1) return error(cb, 'Need at least 1 player in lobby'); r.aiEnabled = !!_?.ai; if (r.players.length % 2 && r.aiEnabled) { r.players.push({ id: 'ai-' + crypto.randomUUID(), name: 'MC BYTE', robot: '❔', ai: true, score: 0, connected: true, submitted: true, lines: [], voiceId: null, voiceOwner: null }); } if (r.players.length < 2) return error(cb, 'Need 2 players, or enable AI challenger'); dealCards(r); cb?.({ ok: true }); });
+  s.on('host:studio-progress', data => {
+    const r = rooms.get(s.data.code);
+    if (!r || r.host !== s.id || r.phase !== 'rendering') return;
+    const total = Math.min(100, Math.max(0, Math.floor(Number(data?.total) || 0)));
+    const done = Math.min(total, Math.max(0, Math.floor(Number(data?.done) || 0)));
+    const stage = safe(data?.stage, 150);
+    const model = data?.model === null || data?.model === undefined ? null : Math.min(100, Math.max(0, Math.round(Number(data.model) || 0)));
+    io.to(r.code).emit('studio:progress', {done,total,stage,model});
+  });
+  s.on('studio:hype', () => {
+    const r = rooms.get(s.data.code);
+    if (!r || r.phase !== 'rendering') return;
+    const now = Date.now();
+    if (now - (s.data.lastHype || 0) < 750) return;
+    s.data.lastHype = now;
+    r.hypeCount = Math.min(9999, (r.hypeCount || 0) + 1);
+    io.to(r.code).emit('studio:hype', {count:r.hypeCount});
+  });
   s.on('host:rendered', (data, cb) => { const r = rooms.get(s.data.code); if (!r || r.host !== s.id || r.phase !== 'rendering') return error(cb, 'Not rendering'); const ms = Math.min(300000, Math.max(45000, (Number(data?.durationMs) || 0) + 20000)); beginVoting(r, ms); cb?.({ ok: true }); });
   s.on('submit', (data, cb) => { const r = rooms.get(s.data.code), p = r && player(r, s.id); if (!p || r.phase !== 'writing') return error(cb, 'Not writing now'); if (p.submitted) return error(cb, 'Already submitted'); if (!Array.isArray(data?.fills) || data.fills.length !== 2 || !Array.isArray(data?.customs) || data.customs.length !== 2) return error(cb, 'Fill in both words and write both bars'); const fills = data.fills.map(x => safe(x, 24)), customs = data.customs.map(x => safe(x, 100)); if (fills.some(x => x.length < 1)) return error(cb, 'Fill in both blanks'); if (customs.some(x => x.length < 3)) return error(cb, 'Both of your own bars need at least 3 characters'); const choice = Number(data?.beatChoice); if (!Number.isInteger(choice) || choice < 0 || choice > 2) return error(cb, 'Choose one of your three mystery beats'); p.beatChoice = choice; p.lines = [fillBar(p.prompts[0], fills[0]), customs[0], fillBar(p.prompts[1], fills[1]), customs[1]]; p.submitted = true; cb?.({ ok: true }); publish(r); if (r.players.every(x => x.submitted)) startBattle(r); });
   s.on('vote', (data, cb) => { const r = rooms.get(s.data.code); if (!r || r.phase !== 'voting' || s.data.role === 'host') return error(cb, 'Voting closed'); if (r.votes.has(s.id)) return error(cb, 'Already voted'); if (!r.players.some(p => p.id === data?.id) || data.id === s.id) return error(cb, 'Invalid vote'); r.votes.set(s.id, data.id); cb?.({ ok: true }); const voters = [...r.players, ...r.audience].filter(p => p.connected && !p.ai); if (r.votes.size >= voters.length && Date.now() >= r.performanceEndsAt) finishVoting(r); });

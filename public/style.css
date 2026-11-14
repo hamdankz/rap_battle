@@ -7,3 +7,11 @@
 
 /* Private beat selection on each player's phone */
 .beat-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:16px 0 22px}.beat-card{display:flex;flex-direction:column;align-items:center;gap:6px;padding:18px 6px;font-size:22px;min-height:105px}.beat-card span{font-size:14px;font-weight:800}.beat-card small{font-size:11px;opacity:.85}.beat-card.chosen{outline:3px solid #72f4d4;outline-offset:2px}button:disabled{opacity:.5;cursor:not-allowed}
+
+/* Real-time, interactive voice preparation */
+.studio{overflow:hidden}.studio-disc{font-size:64px;display:inline-block;animation:studio-spin 3s linear infinite;filter:drop-shadow(0 0 14px #39e8f099)}
+.studio h1{font-size:clamp(34px,6vw,60px)}.studio-stage{font-size:clamp(17px,3vw,24px);font-weight:700;color:var(--cyan);min-height:42px;margin:18px 0}
+.studio-track{height:28px;background:#100e25;border:2px solid #7563a8;border-radius:40px;overflow:hidden;margin:18px auto 8px;max-width:700px}
+.studio-fill{height:100%;width:0%;border-radius:40px;background:repeating-linear-gradient(110deg,#39e8f0 0 20px,#ff4cc7 20px 40px,#ffe066 40px 60px);transition:width .35s ease}
+.studio-count{font-weight:700;color:var(--yellow)}.studio-hype{display:flex;align-items:center;justify-content:center;gap:18px;flex-wrap:wrap;margin:20px auto}.studio-hype span{font-size:23px;font-weight:700;color:var(--yellow)}
+.studio-hype button.pop{animation:studio-pop .3s ease}@keyframes studio-spin{to{transform:rotate(360deg)}}@keyframes studio-pop{50%{transform:scale(1.15)}}@media(prefers-reduced-motion:reduce){.studio-disc,.studio-hype button.pop{animation:none}}

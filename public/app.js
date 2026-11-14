@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id), socket = io();
-let beatChoice = null; let voiceWarnings = []; let castStatus = 'Kokoro not loaded'; let role = '', self = '', state = null, questions = [], voted = false, lastPhase = '', preparedKey = '', performedKey = '', plan = null, playing = [], timeouts = [], renderMsg = '', msPerSyl = 230, draft = { fill1: '', cus1: '', fill2: '', cus2: '' };
+let beatChoice = null; let voiceWarnings = []; let castStatus = 'Kokoro not loaded'; let role = '', self = '', state = null, questions = [], voted = false, lastPhase = '', preparedKey = '', performedKey = '', plan = null, playing = [], timeouts = [], renderMsg = '', msPerSyl = 230, studioProgress = {done:0,total:0,stage:'Waiting for the producer…',model:null}, studioHype = 0, draft = { fill1: '', cus1: '', fill2: '', cus2: '' };
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const show = id => { for (const x of ['home', 'join', 'game']) $(x).classList.toggle('hidden', x !== id); };
 const send = (event, data, ok) => socket.emit(event, data, r => { if (!r?.ok) return alert(r?.error || 'Server error'); ok?.(r); });
@@ -11,10 +11,12 @@ $('backBtn').onclick = () => show('home');
 $('enterBtn').onclick = () => send('join', { code: $('roomInput').value, name: $('nameInput').value }, r => { role = r.role; self = r.id; show('game'); });
 socket.on('disconnect', () => { if (role) alert('Connection lost. Reload to create or join a new game.'); });
 socket.on('closed', () => { alert('The host closed this room.'); location.reload(); });
+socket.on('studio:progress', data => { studioProgress = data; updateStudio(); });
+socket.on('studio:hype', data => { studioHype = data.count; updateStudio(); });
 socket.on('prompt', p => { questions = p.prompts; draft = { fill1: '', cus1: '', fill2: '', cus2: '' }; beatChoice = null; render(); });
 socket.on('state', s => {
   const phaseChanged = s.phase !== lastPhase; state = s;
-  if (phaseChanged) { voted = false; lastPhase = s.phase; if (s.phase !== 'voting') stopShow(); }
+  if (phaseChanged) { voted = false; lastPhase = s.phase; if (s.phase !== 'voting') stopShow(); if (s.phase === 'rendering') { studioProgress = {done:0,total:0,stage:'Warming up the studio…',model:null}; studioHype = 0; } }
   render();
   if (role === 'host') { if (s.phase === 'rendering') prepareBattle(s); if (s.phase === 'voting') perform(s); }
 });
@@ -37,7 +39,7 @@ function render() {
     html = `<div class="arena"><h1>✍️ WRITE 4 BARS</h1><p class="status">🎴 Choose a secret beat for YOUR rap. The style is revealed when you perform.</p><div class="timer" id="timer"></div>${role === 'player' && !me?.submitted ? barsForm() : `<p class="status">${role === 'host' ? 'Players are writing their verses...' : me?.submitted ? 'Your lyrics are locked in!' : 'Waiting for rappers...'}</p>`}<div class="roster">${players.map(p => `<div class="bot">${esc(p.robot)} MC ??? ${p.submitted ? '✅' : '✍️'}</div>`).join('')}</div></div>`;
   }
   if (state.phase === 'rendering') {
-    html = `<div class="arena"><h1>🎛️ IN THE STUDIO</h1><p class="status">${role === 'host' ? 'Recording the mystery voices over the beat…' : 'The host is mixing the battle. Hang tight!'}</p><p class="muted" id="renderProgress">${esc(renderMsg)}</p><div class="roster">${players.map(p => `<div class="bot">${esc(p.robot)} MC ???</div>`).join('')}</div></div>`;
+    html = `<div class="arena studio"><div class="studio-disc" aria-hidden="true">💿</div><h1>🎛️ THE BEAT LAB</h1><p class="status">The robots are cooking up your verses!</p><div class="studio-stage" id="studioStage" aria-live="polite"></div><div class="studio-track" role="progressbar" aria-label="Voice clips prepared" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="studioTrack"><div class="studio-fill" id="studioFill"></div></div><div class="studio-count" id="studioCount"></div><p class="muted" id="renderProgress"></p><div class="studio-hype"><button type="button" id="studioHype">🔥 HYPE THE STUDIO!</button><span id="studioHypeCount">0 🔥</span></div><p class="muted">Tap to send energy to the producer. The bar moves only when real audio is ready.</p><div class="roster">${players.map(p => `<div class="bot">${esc(p.robot)} MC ???</div>`).join('')}</div></div>`;
   }
   if (state.phase === 'voting') {
     html = `<div class="arena"><h1>🎤 THE RAP SHOWDOWN</h1><p class="status">🎴 Every MC chose a secret beat — watch each style reveal!</p><div class="timer" id="timer"></div><div class="battle">${(state.battle || []).map(p => `<div class="bot"><div class="face">${esc(p.robot)}</div><strong>${esc(p.name)}</strong><small>🥁 ${esc(p.beat?.name || 'Boom Bap')} • 🎙️ ${esc(castLabel(p, players))}</small><div class="lyrics">${p.lines.map((l, i) => `<p data-k="${esc(p.id)}:${i}">${esc(l)}</p>`).join('')}</div></div>`).join('')}</div>${role === 'host' ? `<p class="muted">Turn up the sound! Players vote on their phones.</p>${Beat.ctx && Beat.ctx.state !== 'running' ? '<button id="unmute">🔊 TAP TO ENABLE SOUND</button>' : ''}` : voted ? '<p class="status">Vote received!</p>' : `<p>VOTE FOR YOUR FAVORITE (NOT YOURSELF)</p><div class="votegrid">${players.filter(p => p.id !== self).map(p => `<button data-vote="${esc(p.id)}">${esc(p.robot)} ${esc(p.name)}</button>`).join('')}</div>`}</div>`;
@@ -52,6 +54,7 @@ function render() {
     html = `<div class="arena"><h1>👑 CHAMPION</h1><div class="hero">${esc(winner?.robot || '🤖')}</div><h1>${esc(state.champion)}</h1><div class="roster">${[...players].sort((a, b) => b.score - a.score).map(bot).join('')}</div>${reveal}${state.finishReason ? `<p class="status">${esc(state.finishReason)}</p>` : ''}<p>Refresh to start a new party!</p></div>`;
   }
   c.innerHTML = html;
+  if (state.phase === 'rendering') { updateStudio(); const hype = $('studioHype'); if (hype) hype.onclick = () => { hype.classList.remove('pop'); void hype.offsetWidth; hype.classList.add('pop'); socket.emit('studio:hype'); }; }
   if ($('start')) $('start').onclick = () => { Beat.init().resume(); send('host:start', { ai: !!$('aiToggle')?.checked }); };
   if ($('next')) $('next').onclick = () => send('host:next', {});
   if ($('submit')) $('submit').onclick = () => send('submit', { fills: [draft.fill1, draft.fill2], customs: [draft.cus1, draft.cus2], beatChoice }, () => { });
@@ -121,9 +124,21 @@ function clipMeasureCount(clip, measureSec) {
   const audioMeasures = clip.buf ? Math.ceil((clip.buf.dur + 0.2) / measureSec) : Math.ceil(countSyl(clip.line) * 0.24 / measureSec);
   return Math.max(phrase, Math.ceil(audioMeasures / phrase) * phrase);
 }
-function showRenderProgress(message) {
+function updateStudio() {
+  if (state?.phase !== 'rendering') return;
+  const p = studioProgress, pct = p.total > 0 ? Math.round(p.done / p.total * 100) : 0;
+  if ($('studioStage')) $('studioStage').textContent = p.stage || 'Preparing voices…';
+  if ($('studioFill')) $('studioFill').style.width = pct + '%';
+  if ($('studioTrack')) $('studioTrack').setAttribute('aria-valuenow', String(pct));
+  if ($('studioCount')) $('studioCount').textContent = p.total ? `${p.done} / ${p.total} voice clips ready • ${pct}%` : 'Loading the AI model…';
+  if ($('renderProgress')) $('renderProgress').textContent = p.model === null ? 'Model loading progress will appear here.' : `AI model download: ${p.model}%`;
+  if ($('studioHypeCount')) $('studioHypeCount').textContent = `${studioHype} 🔥`;
+}
+function showRenderProgress(message, done, total, model) {
   renderMsg = message;
-  if ($('renderProgress')) $('renderProgress').textContent = message;
+  studioProgress = {stage: message, done: done ?? studioProgress.done, total: total ?? studioProgress.total, model: model === undefined ? studioProgress.model : model};
+  updateStudio();
+  if (role === 'host' && state?.phase === 'rendering') socket.emit('host:studio-progress', studioProgress);
 }
 async function prepareBattle(s) {
   const key = s.code + ':' + s.round;
@@ -133,11 +148,12 @@ async function prepareBattle(s) {
   const players = s.players || [];
   const total = (s.battle || []).reduce((n, p) => n + p.lines.length, 0);
   const clips = []; let n = 0; let kokoroReady = false;
+  showRenderProgress('Booting the voice synthesizer…', 0, total, null);
   // The host downloads and loads the model only once per page session.
   try {
     await KokoroCast.ensure(progress => {
       const pct = typeof progress.progress === 'number' ? ` ${Math.round(progress.progress)}%` : '';
-      showRenderProgress('Loading free Kokoro AI voices' + pct + '…');
+      showRenderProgress('Loading free Kokoro AI voices' + pct + '…', 0, total, typeof progress.progress === 'number' ? Math.min(100, Math.max(0, Math.round(progress.progress))) : null);
     });
     kokoroReady = true;
   } catch (e) {
@@ -167,6 +183,7 @@ async function prepareBattle(s) {
         } catch (e) { voiceWarnings.push(`${p.name}: Kokoro failed (${e.message}); using built-in speech.`); }
       }
       clips.push({ p, idx, line, buf, voice });
+      showRenderProgress(`${buf ? '🎙️ Recorded' : '⚠️ Fallback prepared'}: ${p.name} • ${n}/${total}`, n, total);
     }
   }
   // Each performer owns a separate beat timeline, with a fresh one-bar intro.
@@ -187,7 +204,7 @@ async function prepareBattle(s) {
   }
   plan = { key, items, segments, durationSec:seconds };
 
-  showRenderProgress(voiceWarnings.length ? '⚠ ' + voiceWarnings[0] : 'All AI voices ready!');
+  showRenderProgress(voiceWarnings.length ? '⚠ ' + voiceWarnings[0] : '🎉 All voices recorded! Dropping the beat…', total, total);
   // The server controls the voting timer; account for the entire audio performance.
   socket.emit('host:rendered', { durationMs: Math.round((seconds + 1) * 1000) });
 }
