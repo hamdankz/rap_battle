@@ -44,12 +44,31 @@
       if (!loading) {
         loading = (async () => {
           notify({ status: 'loading', message: 'Loading Kokoro voice engine' });
-          const { KokoroTTS } = await import('https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/+esm');
-          const instance = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', {
-            dtype: 'q8',
-            device: 'wasm',
-            progress_callback: (progress) => notify(progress)
-          });
+          // Some Safari/browser +esm dependency builds fail with
+          // `self is not an Object (evaluating '"caches" in self')`.
+          // Try a separately bundled CDN if the first route fails.
+          const sources = [
+            'https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/+esm',
+            'https://esm.sh/kokoro-js@1.2.1?bundle'
+          ];
+          let instance, lastError;
+          for (const source of sources) {
+            try {
+              notify({ status: 'loading', message: 'Loading voice engine from ' + new URL(source).host });
+              const { KokoroTTS } = await import(source);
+              if (!KokoroTTS) throw new Error('KokoroTTS export missing');
+              instance = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', {
+                dtype: 'q8',
+                device: 'wasm',
+                progress_callback: (progress) => notify(progress)
+              });
+              break;
+            } catch (error) {
+              lastError = error;
+              console.warn('Kokoro loading attempt failed:', source, error);
+            }
+          }
+          if (!instance) throw new Error('Both browser model loaders failed: ' + (lastError?.message || 'unknown error'));
           tts = instance;
           notify({ status: 'ready', message: 'Kokoro voices ready' });
           return instance;

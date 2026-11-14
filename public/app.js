@@ -196,10 +196,18 @@ function perform(s) {
   performedKey = plan.key;
   const ctx = Beat.init();
   const t0 = ctx.currentTime + 0.45;
+  // One transition timer per MC. The old implementation scheduled a stop and
+  // a start at the same boundary, so the previous MC's stop could silence
+  // the next MC. Beat.start() itself stops the previous beat scheduler.
   for (const seg of plan.segments) {
-    timeouts.push(setTimeout(() => Beat.start(seg.beat.name, ctx.currentTime + 0.12), Math.max(0, (t0 + seg.startSec - ctx.currentTime - 0.12) * 1000)));
-    timeouts.push(setTimeout(() => Beat.stop(), Math.max(0, (t0 + seg.endSec - ctx.currentTime) * 1000)));
+    const switchAt = t0 + seg.startSec;
+    timeouts.push(setTimeout(() => {
+      Beat.start(seg.beat.name, Math.max(ctx.currentTime + 0.08, switchAt));
+    }, Math.max(0, (switchAt - ctx.currentTime - 0.08) * 1000)));
   }
+  // Stop only after the FINAL performance, never between opponents.
+  const finalEnd = t0 + plan.durationSec;
+  timeouts.push(setTimeout(() => Beat.stop(), Math.max(0, (finalEnd - ctx.currentTime) * 1000)));
   for (const it of plan.items) {
     const when = t0 + it.startSec;
     const delay = Math.max(0, (when - ctx.currentTime) * 1000);
