@@ -21,7 +21,11 @@ socket.on('state', s => {
   if (role === 'host') { if (s.phase === 'rendering') prepareBattle(s); if (s.phase === 'voting') perform(s); }
 });
 
-const castVoice = (p, players) => window.KokoroCast.voiceFor(Math.max(0, ['circuit','glitch','chrome','cosmo','volt','bolt','brain','rocket'].indexOf(players.find(x => x.id === p.id)?.mcId)));
+const castVoice = (p, players) => {
+  const ids = ['circuit','glitch','chrome','cosmo','volt','bolt','brain','rocket'];
+  const mcId = players.find(x => x.id === p.id)?.mcId;
+  return window.KokoroCast.voiceFor(Math.max(0, ids.indexOf(mcId)));
+};
 const castLabel = (p, players) => castVoice(p, players).label;
 const bot = p => `<div class="bot"><div class="face">${esc(p.robot)}</div><strong>${esc(p.name)}</strong><small>${p.score || 0} pts</small></div>`;
 function render() {
@@ -178,12 +182,22 @@ async function prepareBattle(s) {
       }
       if (!buf && kokoroReady) {
         try {
-          const blob = await KokoroCast.speakWav(line, voice.id);
-          buf = trimClip(await ctx.decodeAudioData(await blob.arrayBuffer()));
-        } catch (e) { voiceWarnings.push(`${p.name}: Kokoro failed (${e.message}); using built-in speech.`); }
+          // Use the exact same KokoroCast.speakWav path as MC Library previews.
+          // Generate short phrases independently to reduce WASM memory spikes.
+          const blob = await window.KokoroCast.speakWav(line, voice.id);
+          if (!blob || !blob.size) throw new Error('Kokoro produced an empty audio clip');
+          const decoded = await ctx.decodeAudioData(await blob.arrayBuffer());
+          buf = trimClip(decoded);
+        } catch (e) {
+          console.error('Kokoro battle clip failed', {mc:p.name, lineIndex:idx, voice:voice.id}, e);
+          voiceWarnings.push(`${p.name}: Kokoro failed (${e.message})`);
+          showRenderProgress(`⚠ ${p.name}: Kokoro failed — see browser console`, n - 1, total);
+          // Never count a browser fallback as a successfully prepared AI voice.
+          // Keep the game progressing, but label fallback explicitly.
+        }
       }
       clips.push({ p, idx, line, buf, voice });
-      showRenderProgress(`${buf ? '🎙️ Recorded' : '⚠️ Fallback prepared'}: ${p.name} • ${n}/${total}`, n, total);
+      showRenderProgress(`${buf ? '🎙️ Recorded' : '⚠️ Browser fallback'}: ${p.name} • ${n}/${total}`, n, total);
     }
   }
   // Each performer owns a separate beat timeline, with a fresh one-bar intro.
