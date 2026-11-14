@@ -4,3 +4,6 @@
 .fillrow{display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap;color:#fff;font-size:18px}.fillrow input{max-width:220px;margin:8px 0}.syl{font-size:14px;min-height:20px}.syl.ok{color:#5dff9a}.syl.near{color:var(--yellow)}.syl.off{color:#ff8a8a}.lyrics p.now{color:var(--yellow);font-weight:700}
 
 .ai-option{display:flex;align-items:center;justify-content:center;gap:10px;margin:18px;color:#ffe066}.ai-option input{width:auto;margin:0}.secret-card{min-width:140px;background:linear-gradient(140deg,#47327d,#1a1740);border:2px solid #ffe066}.secret-card .face{font-size:62px}
+
+/* Private beat selection on each player's phone */
+.beat-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:16px 0 22px}.beat-card{display:flex;flex-direction:column;align-items:center;gap:6px;padding:18px 6px;font-size:22px;min-height:105px}.beat-card span{font-size:14px;font-weight:800}.beat-card small{font-size:11px;opacity:.85}.beat-card.chosen{outline:3px solid #72f4d4;outline-offset:2px}button:disabled{opacity:.5;cursor:not-allowed}

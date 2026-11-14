@@ -5,6 +5,18 @@ window.Beat = (() => {
     'Boom Bap': { bpm: 88, kick: [0, 7, 10], snare: [4, 12], hat: [0, 2, 4, 6, 8, 10, 12, 14], bass: [0, 7, 10], roots: [55, 55, 65.41, 49], bassLen: 3 },
     'Trap': { bpm: 140, kick: [0, 6, 10], snare: [8], hat: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], bass: [0, 6, 10], roots: [49, 49, 58.27, 43.65], bassLen: 5 },
     'UK Drill': { bpm: 142, kick: [0, 7, 10, 14], snare: [8, 15], hat: [0, 2, 4, 6, 8, 10, 12, 13, 14, 15], bass: [0, 3, 7, 10], roots: [55, 55, 51.91, 46.25], bassLen: 4 },
+    'G-Funk': { bpm:95, kick:[0,6,10], snare:[4,12], hat:[0,2,4,6,8,10,12,14], bass:[0,6,10], roots:[55,65.41,73.42,49], bassLen:4 },
+    'Dark Underground': { bpm:82, kick:[0,7,11], snare:[4,12], hat:[0,4,6,8,12,14], bass:[0,7,11], roots:[46.25,46.25,51.91,43.65], bassLen:5 },
+    'Phonk': { bpm:130, kick:[0,3,8,11], snare:[4,12], hat:[0,2,4,6,8,10,12,14], bass:[0,3,8,11], roots:[55,55,65.41,49], bassLen:3 },
+    'Jazz Rap': { bpm:90, kick:[0,7,10], snare:[4,12], hat:[0,3,6,8,11,14], bass:[0,6,10], roots:[55,61.74,65.41,49], bassLen:4 },
+    'Grime': { bpm:140, kick:[0,5,10,14], snare:[4,12], hat:[0,2,6,8,10,14], bass:[0,5,10], roots:[49,49,58.27,43.65], bassLen:4 },
+    'Memphis Rap': { bpm:92, kick:[0,6,10], snare:[4,12], hat:[0,2,4,6,8,10,12,14], bass:[0,6,10], roots:[51.91,51.91,46.25,43.65], bassLen:4 },
+    'Lo-Fi Hip-Hop': { bpm:80, kick:[0,7,10], snare:[4,12], hat:[0,3,6,9,12,15], bass:[0,7,10], roots:[55,61.74,65.41,49], bassLen:3 },
+    'Jersey Club Rap': { bpm:135, kick:[0,3,6,8,11,14], snare:[4,12], hat:[0,2,4,6,8,10,12,14], bass:[0,6,11], roots:[55,55,65.41,49], bassLen:2 },
+    'Industrial Rap': { bpm:105, kick:[0,4,7,10,14], snare:[4,12], hat:[0,1,4,7,8,11,12,15], bass:[0,7,10], roots:[46.25,51.91,46.25,43.65], bassLen:4 },
+    'Funk Rap': { bpm:108, kick:[0,3,7,10,14], snare:[4,12], hat:[0,2,4,6,8,10,12,14], bass:[0,3,7,10], roots:[55,65.41,73.42,49], bassLen:2 },
+    'Epic Cinematic Rap': { bpm:100, kick:[0,6,8,14], snare:[4,12], hat:[0,2,4,6,8,10,12,14], bass:[0,6,8,14], roots:[43.65,49,51.91,41.2], bassLen:5 },
+    'Cyberpunk Battle': { bpm:125, kick:[0,3,8,10,14], snare:[4,12], hat:[0,1,3,5,7,8,10,12,14,15], bass:[0,3,8,14], roots:[55,58.27,51.91,49], bassLen:3 },
   };
   const stepDur = () => 60 / cfg.bpm / 4;
   const env = (g, t, a, d) => { g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(a, t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t + d); };

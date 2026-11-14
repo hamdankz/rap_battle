@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id), socket = io();
-let voiceWarnings = []; let role = '', self = '', state = null, questions = [], voted = false, lastPhase = '', preparedKey = '', performedKey = '', plan = null, playing = [], timeouts = [], renderMsg = '', msPerSyl = 230, draft = { fill1: '', cus1: '', fill2: '', cus2: '' };
+let beatChoice = null; let voiceWarnings = []; let castStatus = 'Kokoro not loaded'; let role = '', self = '', state = null, questions = [], voted = false, lastPhase = '', preparedKey = '', performedKey = '', plan = null, playing = [], timeouts = [], renderMsg = '', msPerSyl = 230, draft = { fill1: '', cus1: '', fill2: '', cus2: '' };
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const show = id => { for (const x of ['home', 'join', 'game']) $(x).classList.toggle('hidden', x !== id); };
 const send = (event, data, ok) => socket.emit(event, data, r => { if (!r?.ok) return alert(r?.error || 'Server error'); ok?.(r); });
@@ -11,7 +11,7 @@ $('backBtn').onclick = () => show('home');
 $('enterBtn').onclick = () => send('join', { code: $('roomInput').value, name: $('nameInput').value }, r => { role = r.role; self = r.id; show('game'); });
 socket.on('disconnect', () => { if (role) alert('Connection lost. Reload to create or join a new game.'); });
 socket.on('closed', () => { alert('The host closed this room.'); location.reload(); });
-socket.on('prompt', p => { questions = p.prompts; draft = { fill1: '', cus1: '', fill2: '', cus2: '' }; render(); });
+socket.on('prompt', p => { questions = p.prompts; draft = { fill1: '', cus1: '', fill2: '', cus2: '' }; beatChoice = null; render(); });
 socket.on('state', s => {
   const phaseChanged = s.phase !== lastPhase; state = s;
   if (phaseChanged) { voted = false; lastPhase = s.phase; if (s.phase !== 'voting') stopShow(); }
@@ -19,6 +19,8 @@ socket.on('state', s => {
   if (role === 'host') { if (s.phase === 'rendering') prepareBattle(s); if (s.phase === 'voting') perform(s); }
 });
 
+const castVoice = (p, players) => window.KokoroCast.voiceFor(Math.max(0, players.findIndex(x => x.id === p.id)));
+const castLabel = (p, players) => castVoice(p, players).label;
 const bot = p => `<div class="bot"><div class="face">${esc(p.robot)}</div><strong>${esc(p.name)}</strong><small>${p.score || 0} pts</small></div>`;
 function render() {
   if (!state) return;
@@ -26,19 +28,19 @@ function render() {
   $('phaseLabel').textContent = state.phase.toUpperCase() + ' • ROUND ' + state.round + '/' + state.maxRounds;
   const c = $('content'); const players = state.players; const me = players.find(p => p.id === self); let html = '';
   if (state.phase === 'lobby') {
-    html = `<div class="arena"><p>JOIN ON YOUR PHONE</p><div class="code">${state.code}</div><p>${esc(location.origin)} • Enter this room code</p><div class="roster">${players.map(bot).join('')}</div>${!state.voiceAdapterConfigured ? '<p class="status">⚠ Voice cloning is NOT configured on this server. Custom recordings will NOT be spoken in your voice. Browser voices only.</p>' : '<p class="muted">Voice adapter configured; test custom synthesis before playing.</p>'}<p>${players.length}/8 rappers • ${state.audience} audience members</p>${role === 'host' ? `<label class="ai-option"><input type="checkbox" id="aiToggle"> Add AI challenger when player count is odd</label><button id="start" ${players.length < 1 ? 'disabled' : ''}>START BATTLE</button> <button id="test" class="secondary">🔊 TEST SOUND</button>` : '<p class="status">Waiting for host to start...</p>'}</div>`;
+    html = `<div class="arena"><p>JOIN ON YOUR PHONE</p><div class="code">${state.code}</div><p>${esc(location.origin)} • Enter this room code</p><div class="roster">${players.map(bot).join('')}</div><p class="status">🎙️ 14 free Kokoro AI voices available for preset MCs. Host downloads the voice model once; custom MCs still require the separate voice adapter.</p><p>${players.length}/8 rappers • ${state.audience} audience members</p>${role === 'host' ? `<label class="ai-option"><input type="checkbox" id="aiToggle"> Add AI challenger when player count is odd</label><button id="start" ${players.length < 1 ? 'disabled' : ''}>START BATTLE</button> <button id="test" class="secondary">🔊 TEST SOUND</button>` : '<p class="status">Waiting for host to start...</p>'}</div>`;
   }
   if (state.phase === 'cards') {
     html = `<div class="arena"><h1>🃏 MYSTERY MC CARDS</h1><p>Every MC has been dealt a random card. Identities stay hidden until the rap begins!</p><div class="timer" id="timer"></div><div class="roster">${(state.mcCards || []).map((card, i) => `<div class="bot secret-card"><div class="face">${esc(card)}</div><strong>MC ???</strong><small>Card ${i + 1}</small></div>`).join('')}</div></div>`;
   }
   if (state.phase === 'writing') {
-    html = `<div class="arena"><h1>✍️ WRITE 4 BARS</h1><p class="status">🥁 ${esc(state.beat?.name || '')} • about ${sylTarget()} syllables per bar</p><div class="timer" id="timer"></div>${role === 'player' && !me?.submitted ? barsForm() : `<p class="status">${role === 'host' ? 'Players are writing their verses...' : me?.submitted ? 'Your lyrics are locked in!' : 'Waiting for rappers...'}</p>`}<div class="roster">${players.map(p => `<div class="bot">${esc(p.robot)} MC ??? ${p.submitted ? '✅' : '✍️'}</div>`).join('')}</div></div>`;
+    html = `<div class="arena"><h1>✍️ WRITE 4 BARS</h1><p class="status">🎴 Choose a secret beat for YOUR rap. The style is revealed when you perform.</p><div class="timer" id="timer"></div>${role === 'player' && !me?.submitted ? barsForm() : `<p class="status">${role === 'host' ? 'Players are writing their verses...' : me?.submitted ? 'Your lyrics are locked in!' : 'Waiting for rappers...'}</p>`}<div class="roster">${players.map(p => `<div class="bot">${esc(p.robot)} MC ??? ${p.submitted ? '✅' : '✍️'}</div>`).join('')}</div></div>`;
   }
   if (state.phase === 'rendering') {
     html = `<div class="arena"><h1>🎛️ IN THE STUDIO</h1><p class="status">${role === 'host' ? 'Recording the mystery voices over the beat…' : 'The host is mixing the battle. Hang tight!'}</p><p class="muted" id="renderProgress">${esc(renderMsg)}</p><div class="roster">${players.map(p => `<div class="bot">${esc(p.robot)} MC ???</div>`).join('')}</div></div>`;
   }
   if (state.phase === 'voting') {
-    html = `<div class="arena"><h1>🎤 THE RAP SHOWDOWN</h1><p class="status">🥁 ${esc(state.beat?.name || '')}</p><div class="timer" id="timer"></div><div class="battle">${(state.battle || []).map(p => `<div class="bot"><div class="face">${esc(p.robot)}</div><strong>${esc(p.name)}</strong>${state.hasVoices ? '<small>🎭 mystery voice</small>' : ''}<div class="lyrics">${p.lines.map((l, i) => `<p data-k="${esc(p.id)}:${i}">${esc(l)}</p>`).join('')}</div></div>`).join('')}</div>${role === 'host' ? `<p class="muted">Turn up the sound! Players vote on their phones.</p>${Beat.ctx && Beat.ctx.state !== 'running' ? '<button id="unmute">🔊 TAP TO ENABLE SOUND</button>' : ''}` : voted ? '<p class="status">Vote received!</p>' : `<p>VOTE FOR YOUR FAVORITE (NOT YOURSELF)</p><div class="votegrid">${players.filter(p => p.id !== self).map(p => `<button data-vote="${esc(p.id)}">${esc(p.robot)} ${esc(p.name)}</button>`).join('')}</div>`}</div>`;
+    html = `<div class="arena"><h1>🎤 THE RAP SHOWDOWN</h1><p class="status">🎴 Every MC chose a secret beat — watch each style reveal!</p><div class="timer" id="timer"></div><div class="battle">${(state.battle || []).map(p => `<div class="bot"><div class="face">${esc(p.robot)}</div><strong>${esc(p.name)}</strong><small>🥁 ${esc(p.beat?.name || 'Boom Bap')} • 🎙️ ${esc(castLabel(p, players))}</small><div class="lyrics">${p.lines.map((l, i) => `<p data-k="${esc(p.id)}:${i}">${esc(l)}</p>`).join('')}</div></div>`).join('')}</div>${role === 'host' ? `<p class="muted">Turn up the sound! Players vote on their phones.</p>${Beat.ctx && Beat.ctx.state !== 'running' ? '<button id="unmute">🔊 TAP TO ENABLE SOUND</button>' : ''}` : voted ? '<p class="status">Vote received!</p>' : `<p>VOTE FOR YOUR FAVORITE (NOT YOURSELF)</p><div class="votegrid">${players.filter(p => p.id !== self).map(p => `<button data-vote="${esc(p.id)}">${esc(p.robot)} ${esc(p.name)}</button>`).join('')}</div>`}</div>`;
   }
   if (state.phase === 'results') {
     const sorted = [...players].sort((a, b) => (state.results?.[b.id] || 0) - (state.results?.[a.id] || 0));
@@ -52,10 +54,11 @@ function render() {
   c.innerHTML = html;
   if ($('start')) $('start').onclick = () => { Beat.init().resume(); send('host:start', { ai: !!$('aiToggle')?.checked }); };
   if ($('next')) $('next').onclick = () => send('host:next', {});
-  if ($('submit')) $('submit').onclick = () => send('submit', { fills: [draft.fill1, draft.fill2], customs: [draft.cus1, draft.cus2] }, () => { });
+  if ($('submit')) $('submit').onclick = () => send('submit', { fills: [draft.fill1, draft.fill2], customs: [draft.cus1, draft.cus2], beatChoice }, () => { });
+  c.querySelectorAll('[data-beat-choice]').forEach(b => b.onclick = () => { beatChoice = Number(b.dataset.beatChoice); render(); });
   ['fill1', 'cus1', 'fill2', 'cus2'].forEach(k => { const el = $(k); if (el) el.oninput = () => { draft[k] = el.value; updateSyl(); }; });
   updateSyl();
-  if ($('test')) $('test').onclick = () => { Beat.init().resume(); Beat.start('Boom Bap'); window.speechSynthesis?.speak(new SpeechSynthesisUtterance('Sound check. One, two.')); setTimeout(() => Beat.stop(), 4000); };
+  if ($('test')) $('test').onclick = async () => { Beat.init(); await Beat.ctx.resume(); const btn = $('test'); btn.disabled = true; btn.textContent = '⏳ LOADING VOICE…'; try { const blob = await KokoroCast.speakWav('Sound check. One, two. Welcome to Robo Rhyme Royale.', KokoroCast.CAST[0].id); const buffer = await Beat.ctx.decodeAudioData(await blob.arrayBuffer()); const t = Beat.start('Boom Bap', Beat.ctx.currentTime + 0.2); const src = Beat.ctx.createBufferSource(); src.buffer = buffer; src.connect(Beat.vocal); src.start(t); setTimeout(() => Beat.stop(), (buffer.duration + 0.5) * 1000); btn.textContent = '🔊 TEST SOUND AGAIN'; } catch (e) { btn.textContent = '⚠ KOKORO FAILED — RETRY AFTER RELOAD'; alert('Kokoro could not load: ' + e.message); } finally { btn.disabled = false; } };
   if ($('unmute')) $('unmute').onclick = () => { Beat.ctx.resume(); $('unmute').remove(); };
   c.querySelectorAll('[data-vote]').forEach(b => b.onclick = () => send('vote', { id: b.dataset.vote }, () => { voted = true; render(); }));
   tick();
@@ -71,7 +74,7 @@ function sylTarget() { const st = state?.beat; return st ? Math.round(barSecOf(s
 function barsForm() {
   const q = i => String(questions[i] || 'Say a word ___');
   const row = i => `<div class="prompt">BAR ${i * 2 + 1} • FILL IN THE LAST WORD</div><div class="fillrow"><span>${esc(q(i).replace(/\s*___\s*$/, '').replace('___', '…'))}</span><input id="fill${i + 1}" maxlength="24" autocomplete="off" placeholder="word" value="${esc(draft['fill' + (i + 1)])}"></div><div class="syl" id="syl-fill${i + 1}"></div><div class="prompt">BAR ${i * 2 + 2} • WRITE YOUR OWN BAR</div><textarea id="cus${i + 1}" maxlength="100" placeholder="Rhyme with your word…">${esc(draft['cus' + (i + 1)])}</textarea><div class="syl" id="syl-cus${i + 1}"></div>`;
-  return `<p>Two rounds of: fill in the last word, then write a bar that rhymes with it.</p>${row(0)}${row(1)}<button id="submit">LOCK IN LYRICS</button>`;
+  return `<p>Choose one mystery beat card. You won't know the style until your robot performs!</p><div class="beat-cards">${['A','B','C'].map((x,i)=>`<button type="button" class="beat-card ${beatChoice===i?'chosen':''}" data-beat-choice="${i}" aria-pressed="${beatChoice===i}">🎴<span>BEAT ${x}</span><small>${beatChoice===i?'✓ Selected':'Mystery style'}</small></button>`).join('')}</div><p>Two rounds of: fill in the last word, then write a bar that rhymes with it.</p>${row(0)}${row(1)}<button id="submit" ${beatChoice===null?'disabled':''}>LOCK IN LYRICS</button>`;
 }
 function updateSyl() {
   const t = sylTarget();
@@ -107,77 +110,114 @@ function speakFit(text, pitch, barSec, onstart) {
   const rate = Math.min(2, Math.max(0.6, (Math.max(1, countSyl(text)) * msPerSyl / 1000) / (barSec * 0.88)));
   speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.pitch = pitch; u.rate = rate; if (onstart) u.onstart = onstart; speechSynthesis.speak(u);
 }
+// Pick a musical phrase length of 2, 3, or 5 measures based on syllable density.
+// Audio duration is the final authority: long lines get extra complete loops, never cut off.
+function phraseBars(syllables) {
+  const needed = Math.max(1, Math.ceil(syllables / 8));
+  return [2, 3, 5].find(x => x >= needed) || 5;
+}
+function clipMeasureCount(clip, measureSec) {
+  const phrase = phraseBars(countSyl(clip.line));
+  const audioMeasures = clip.buf ? Math.ceil((clip.buf.dur + 0.2) / measureSec) : Math.ceil(countSyl(clip.line) * 0.24 / measureSec);
+  return Math.max(phrase, Math.ceil(audioMeasures / phrase) * phrase);
+}
+function showRenderProgress(message) {
+  renderMsg = message;
+  if ($('renderProgress')) $('renderProgress').textContent = message;
+}
 async function prepareBattle(s) {
-  const key = s.code + ':' + s.round; if (preparedKey === key) return; preparedKey = key; plan = null;
+  const key = s.code + ':' + s.round;
+  if (preparedKey === key) return;
+  preparedKey = key; plan = null; voiceWarnings = [];
   const ctx = Beat.init(); await ctx.resume();
-  if (!s.voiceAdapterConfigured) { renderMsg = 'Tuning the bot voices…'; if ($('renderProgress')) $('renderProgress').textContent = renderMsg; await calibrateSpeech(); }
-  voiceWarnings = []; const clips = [], total = (s.battle || []).reduce((n, p) => n + p.lines.length, 0); let n = 0;
-  for (const p of s.battle || []) for (let idx = 0; idx < p.lines.length; idx++) {
-    const line = p.lines[idx];
-    renderMsg = `Recording line ${++n} of ${total}…`; if ($('renderProgress')) $('renderProgress').textContent = renderMsg;
-    let buf = null;
-    if (s.hasVoices) {
-      try {
-        const r = await fetch('/api/voice', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: s.code, pid: p.id, text: line }) });
-        if (!r.ok) {
-          const e = await r.json().catch(() => ({}));
-          throw Error(e.detail || e.error || `HTTP ${r.status}`);
-        }
-        buf = trimClip(await ctx.decodeAudioData(await r.arrayBuffer()));
-      } catch (e) {
-        voiceWarnings.push(`${p.name}: ${e.message}`);
+  const players = s.players || [];
+  const total = (s.battle || []).reduce((n, p) => n + p.lines.length, 0);
+  const clips = []; let n = 0; let kokoroReady = false;
+  // The host downloads and loads the model only once per page session.
+  try {
+    await KokoroCast.ensure(progress => {
+      const pct = typeof progress.progress === 'number' ? ` ${Math.round(progress.progress)}%` : '';
+      showRenderProgress('Loading free Kokoro AI voices' + pct + '…');
+    });
+    kokoroReady = true;
+  } catch (e) {
+    voiceWarnings.push('Kokoro unavailable: ' + e.message);
+    showRenderProgress('⚠ Kokoro failed. Using built-in speech as a fallback.');
+    await calibrateSpeech();
+  }
+  for (const p of s.battle || []) {
+    const custom = !!s.hasVoices; // Server keeps per-player custom IDs private; endpoint decides eligibility.
+    const voice = castVoice(p, players);
+    for (let idx = 0; idx < p.lines.length; idx++) {
+      if (state?.phase !== 'rendering' || state?.code !== s.code || state?.round !== s.round) return;
+      const line = p.lines[idx]; let buf = null;
+      showRenderProgress(`Generating AI voice ${++n}/${total}: ${p.name} (${voice.name})`);
+      // Preserve existing custom voice endpoint exactly as it was.
+      if (custom && s.hasVoices) {
+        try {
+          const r = await fetch('/api/voice', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: s.code, pid: p.id, text: line }) });
+          if (!r.ok) throw Error('HTTP ' + r.status);
+          buf = trimClip(await ctx.decodeAudioData(await r.arrayBuffer()));
+        } catch (e) { voiceWarnings.push(`${p.name}: custom voice unavailable (${e.message}); using Kokoro preset.`); }
       }
+      if (!buf && kokoroReady) {
+        try {
+          const blob = await KokoroCast.speakWav(line, voice.id);
+          buf = trimClip(await ctx.decodeAudioData(await blob.arrayBuffer()));
+        } catch (e) { voiceWarnings.push(`${p.name}: Kokoro failed (${e.message}); using built-in speech.`); }
+      }
+      clips.push({ p, idx, line, buf, voice });
     }
-    clips.push({ p, idx, line, buf });
   }
-  if (voiceWarnings.length) {
-    renderMsg = `⚠ Custom voice failed; browser voice used instead. ${voiceWarnings[0]}`;
-    if ($('renderProgress')) $('renderProgress').textContent = renderMsg;
+  // Each performer owns a separate beat timeline, with a fresh one-bar intro.
+  // 2/3/5-measure phrase lengths repeat until every vocal clip fits.
+  let seconds = 0.5;
+  const items = [], segments = [];
+  for (const p of s.battle || []) {
+    const st = p.beat || {name:'Boom Bap',bpm:88,lineBars:1};
+    const measureSec = 240 / st.bpm;
+    const startSec = seconds;
+    seconds += measureSec; // one-measure instrumental intro per performer
+    for (const c of clips.filter(x => x.p.id === p.id)) {
+      const used = clipMeasureCount(c, measureSec);
+      items.push({...c, startSec: seconds, durationSec: used * measureSec, measures: used});
+      seconds += used * measureSec;
+    }
+    segments.push({startSec, endSec:seconds, beat:st});
   }
-  // Every line is ONE rapped bar. The first bar is an instrumental intro.
-  const st = s.beat, mBar = 240 / st.bpm, rapBar = barSecOf(st); let bars = 0; const items = [];
-  for (const c of clips) {
-    if (c.buf) {
-      const rate = Math.min(1.3, Math.max(0.85, c.buf.dur / (rapBar * 0.92))); // stretch the voice to fill its bar
-      const used = Math.max(st.lineBars, Math.ceil(c.buf.dur / rate / mBar / st.lineBars) * st.lineBars);
-      items.push({ ...c, startBar: bars, rate }); bars += used;
-    } else { items.push({ ...c, startBar: bars, fallback: true }); bars += st.lineBars; }
-  }
-  plan = { key, items, beat: st, bar: mBar, rapBar };
-  socket.emit('host:rendered', { durationMs: Math.round((bars + 1) * mBar * 1000) });
+  plan = { key, items, segments, durationSec:seconds };
+
+  showRenderProgress(voiceWarnings.length ? '⚠ ' + voiceWarnings[0] : 'All AI voices ready!');
+  // The server controls the voting timer; account for the entire audio performance.
+  socket.emit('host:rendered', { durationMs: Math.round((seconds + 1) * 1000) });
 }
 function perform(s) {
-  if (!plan || performedKey === plan.key) return; performedKey = plan.key;
+  if (!plan || performedKey === plan.key) return;
+  performedKey = plan.key;
   const ctx = Beat.init();
-  const first = plan.items[0];
-  // Audio-buffer voices and the beat use the SAME AudioContext clock.
-  // Browser speech has no scheduled-start API, so its first onstart callback
-  // starts the beat instead; later bars use the resulting clock anchor.
-  const startAt = Beat.start(plan.beat.name, ctx.currentTime + 0.35);
-  function scheduleRest(t0, skipFirst) {
-    for (const [index, it] of plan.items.entries()) {
-      if (skipFirst && index === 0) continue;
-      const when = t0 + it.startBar * plan.bar;
-      const delay = Math.max(0, (when - ctx.currentTime) * 1000);
-      if (it.buf) {
-        const src = ctx.createBufferSource(); src.buffer = it.buf.buf;
-        src.playbackRate.value = it.rate; src.connect(Beat.vocal);
-        src.start(Math.max(when, ctx.currentTime + 0.01), it.buf.offset, it.buf.dur); playing.push(src);
-      } else if ('speechSynthesis' in window) {
-        timeouts.push(setTimeout(() => speakFit(it.line, it.p.robot === '👾' ? 0.65 : 1.3, plan.rapBar), delay));
-      }
-      timeouts.push(setTimeout(() => {
-        document.querySelectorAll('.lyrics p.now').forEach(e => e.classList.remove('now'));
-        document.querySelector(`[data-k="${it.p.id}:${it.idx}"]`)?.classList.add('now');
-      }, delay));
-    }
+  const t0 = ctx.currentTime + 0.45;
+  for (const seg of plan.segments) {
+    timeouts.push(setTimeout(() => Beat.start(seg.beat.name, ctx.currentTime + 0.12), Math.max(0, (t0 + seg.startSec - ctx.currentTime - 0.12) * 1000)));
+    timeouts.push(setTimeout(() => Beat.stop(), Math.max(0, (t0 + seg.endSec - ctx.currentTime) * 1000)));
   }
-  scheduleRest(startAt, false);
+  for (const it of plan.items) {
+    const when = t0 + it.startSec;
+    const delay = Math.max(0, (when - ctx.currentTime) * 1000);
+    if (it.buf) {
+      const src = ctx.createBufferSource(); src.buffer = it.buf.buf; src.connect(Beat.vocal);
+      src.start(Math.max(when, ctx.currentTime + 0.02), it.buf.offset, it.buf.dur);
+      playing.push(src);
+    } else if ('speechSynthesis' in window) {
+      timeouts.push(setTimeout(() => speakFit(it.line, it.p.robot === '👾' ? 0.65 : 1.3, it.durationSec), delay));
+    }
+    timeouts.push(setTimeout(() => {
+      document.querySelectorAll('.lyrics p.now').forEach(e => e.classList.remove('now'));
+      document.querySelectorAll('[data-k]').forEach(e => { if (e.getAttribute('data-k') === `${it.p.id}:${it.idx}`) e.classList.add('now'); });
+    }, delay));
+  }
   if (voiceWarnings.length) {
-    const notice = document.createElement('p');
-    notice.className = 'status';
-    notice.textContent = '⚠ Custom voice unavailable. Browser voice is playing instead. ' + voiceWarnings[0];
-    $('content')?.prepend(notice);
+    const notice = document.createElement('p'); notice.className = 'status';
+    notice.textContent = '⚠ ' + voiceWarnings[0]; $('content')?.prepend(notice);
   }
 }
 function stopShow() {

@@ -25,13 +25,17 @@ const loadVoices = () => { try { return JSON.parse(fs.readFileSync(INDEX, 'utf8'
 const saveVoices = v => fs.writeFileSync(INDEX, JSON.stringify(v, null, 1));
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-// Beat styles rotate each round. Must match public/beat.js.
-// lineBars = musical bars that make up ONE rapped bar (trap/drill are half-time, so 2).
+// Every player privately picks one of three shuffled mystery beat cards per round.
+// Keep these names and BPM values in sync with public/beat.js.
 const BEATS = [
-  { name: 'Boom Bap', bpm: 88, lineBars: 1 },
-  { name: 'Trap', bpm: 140, lineBars: 2 },
-  { name: 'UK Drill', bpm: 142, lineBars: 2 },
-];
+  ['Boom Bap',88,1], ['Trap',140,2], ['UK Drill',142,2],
+  ['G-Funk',95,1], ['Dark Underground',82,1], ['Phonk',130,2],
+  ['Jazz Rap',90,1], ['Grime',140,2], ['Memphis Rap',92,1],
+  ['Lo-Fi Hip-Hop',80,1], ['Jersey Club Rap',135,2],
+  ['Industrial Rap',105,1], ['Funk Rap',108,1],
+  ['Epic Cinematic Rap',100,1], ['Cyberpunk Battle',125,2],
+].map(([name,bpm,lineBars]) => ({name,bpm,lineBars}));
+const mysteryOptions = () => shuffle(BEATS).slice(0,3);
 
 const DEFAULT_MCS = [
   ['circuit','Circuit King','🤖'],['glitch','Glitch Witch','👾'],
@@ -92,11 +96,12 @@ function dealCards(r) {
 }
 function startRound(r) {
   timers(r); r.round++; r.phase = 'writing'; r.deadline = Date.now() + 120000; r.results = null; r.battle = null;
-  r.beat = BEATS[(r.round - 1) % BEATS.length];
+  r.beat = null; // No global beat: each performer has a private choice
   for (const p of r.players) {
+    p.beatOptions = mysteryOptions(); p.beatChoice = p.ai ? crypto.randomInt(3) : null;
     p.submitted = !!p.ai; p.lines = p.ai ? [...AI_LINES[(r.round - 1) % AI_LINES.length]] : [];
     p.prompts = [prompts[(r.round * 3 + r.players.indexOf(p)) % prompts.length], prompts[(r.round * 3 + r.players.indexOf(p) + 4) % prompts.length]];
-    if (!p.ai) io.to(p.id).emit('prompt', { prompts: p.prompts });
+    if (!p.ai) io.to(p.id).emit('prompt', { prompts: p.prompts, beatCards: ['A','B','C'] });
   }
   publish(r); r.timer = setTimeout(() => startBattle(r), 120000);
 }
@@ -104,7 +109,7 @@ function startRound(r) {
 function startBattle(r) {
   if (r.phase !== 'writing') return; timers(r);
   r.phase = 'rendering'; r.deadline = 0;
-  r.battle = r.players.map(p => ({ id: p.id, name: p.name, robot: p.robot, lines: p.lines?.length === 4 ? p.lines : ['My circuits crackle with a thunderous beat', 'Your rhymes are weak, accept defeat', 'I never skip a bar, I never miss a rhyme', 'Bow down to the bot, it is rapping time'] }));
+  r.battle = r.players.map(p => ({ id: p.id, name: p.name, robot: p.robot, beat: p.beatOptions?.[p.beatChoice ?? 0] || BEATS[0], lines: p.lines?.length === 4 ? p.lines : ['My circuits crackle with a thunderous beat', 'Your rhymes are weak, accept defeat', 'I never skip a bar, I never miss a rhyme', 'Bow down to the bot, it is rapping time'] }));
   publish(r); r.timer = setTimeout(() => beginVoting(r, 90000), 300000); // safety net if host stalls
 }
 function beginVoting(r, ms) {
@@ -208,7 +213,7 @@ io.on('connection', s => {
   s.on('join', (data, cb) => { if (s.data.code) return error(cb, 'Already joined'); const r = rooms.get(safe(data?.code, 4).toUpperCase()); if (!r) return error(cb, 'Room not found'); const name = safe(data?.name, 18); if (name.length < 2) return error(cb, 'Enter a name (2–18 characters)'); if (r.phase !== 'lobby') return error(cb, 'This game has already started'); if (all(r).some(p => p.name.toLowerCase() === name.toLowerCase())) return error(cb, 'Name already taken'); const audience = r.players.length >= MAX_PLAYERS; if (audience && r.audience.length >= MAX_AUDIENCE) return error(cb, 'Room full'); const p = { id: s.id, name, robot: audience ? '👀' : '❔', score: 0, connected: true, submitted: false, lines: [], voiceId: null, voiceOwner: null }; (audience ? r.audience : r.players).push(p); s.data = { code: r.code, role: audience ? 'audience' : 'player' }; s.join(r.code); cb?.({ ok: true, id: s.id, role: s.data.role, code: r.code }); publish(r); });
   s.on('host:start', (_, cb) => { const r = rooms.get(s.data.code); if (!r || r.host !== s.id) return error(cb, 'Only host can start'); if (r.phase !== 'lobby' || r.players.length < 1) return error(cb, 'Need at least 1 player in lobby'); r.aiEnabled = !!_?.ai; if (r.players.length % 2 && r.aiEnabled) { r.players.push({ id: 'ai-' + crypto.randomUUID(), name: 'MC BYTE', robot: '❔', ai: true, score: 0, connected: true, submitted: true, lines: [], voiceId: null, voiceOwner: null }); } if (r.players.length < 2) return error(cb, 'Need 2 players, or enable AI challenger'); dealCards(r); cb?.({ ok: true }); });
   s.on('host:rendered', (data, cb) => { const r = rooms.get(s.data.code); if (!r || r.host !== s.id || r.phase !== 'rendering') return error(cb, 'Not rendering'); const ms = Math.min(300000, Math.max(45000, (Number(data?.durationMs) || 0) + 20000)); beginVoting(r, ms); cb?.({ ok: true }); });
-  s.on('submit', (data, cb) => { const r = rooms.get(s.data.code), p = r && player(r, s.id); if (!p || r.phase !== 'writing') return error(cb, 'Not writing now'); if (p.submitted) return error(cb, 'Already submitted'); if (!Array.isArray(data?.fills) || data.fills.length !== 2 || !Array.isArray(data?.customs) || data.customs.length !== 2) return error(cb, 'Fill in both words and write both bars'); const fills = data.fills.map(x => safe(x, 24)), customs = data.customs.map(x => safe(x, 100)); if (fills.some(x => x.length < 1)) return error(cb, 'Fill in both blanks'); if (customs.some(x => x.length < 3)) return error(cb, 'Both of your own bars need at least 3 characters'); p.lines = [fillBar(p.prompts[0], fills[0]), customs[0], fillBar(p.prompts[1], fills[1]), customs[1]]; p.submitted = true; cb?.({ ok: true }); publish(r); if (r.players.every(x => x.submitted)) startBattle(r); });
+  s.on('submit', (data, cb) => { const r = rooms.get(s.data.code), p = r && player(r, s.id); if (!p || r.phase !== 'writing') return error(cb, 'Not writing now'); if (p.submitted) return error(cb, 'Already submitted'); if (!Array.isArray(data?.fills) || data.fills.length !== 2 || !Array.isArray(data?.customs) || data.customs.length !== 2) return error(cb, 'Fill in both words and write both bars'); const fills = data.fills.map(x => safe(x, 24)), customs = data.customs.map(x => safe(x, 100)); if (fills.some(x => x.length < 1)) return error(cb, 'Fill in both blanks'); if (customs.some(x => x.length < 3)) return error(cb, 'Both of your own bars need at least 3 characters'); const choice = Number(data?.beatChoice); if (!Number.isInteger(choice) || choice < 0 || choice > 2) return error(cb, 'Choose one of your three mystery beats'); p.beatChoice = choice; p.lines = [fillBar(p.prompts[0], fills[0]), customs[0], fillBar(p.prompts[1], fills[1]), customs[1]]; p.submitted = true; cb?.({ ok: true }); publish(r); if (r.players.every(x => x.submitted)) startBattle(r); });
   s.on('vote', (data, cb) => { const r = rooms.get(s.data.code); if (!r || r.phase !== 'voting' || s.data.role === 'host') return error(cb, 'Voting closed'); if (r.votes.has(s.id)) return error(cb, 'Already voted'); if (!r.players.some(p => p.id === data?.id) || data.id === s.id) return error(cb, 'Invalid vote'); r.votes.set(s.id, data.id); cb?.({ ok: true }); const voters = [...r.players, ...r.audience].filter(p => p.connected && !p.ai); if (r.votes.size >= voters.length) finishVoting(r); });
   s.on('host:next', (_, cb) => { const r = rooms.get(s.data.code); if (!r || r.host !== s.id || r.phase !== 'results') return error(cb, 'Cannot advance'); if (r.round >= r.maxRounds) { r.phase = 'finished'; r.finishedAt = Date.now(); r.champion = [...r.players].sort((a, b) => b.score - a.score)[0]?.name; publish(r); } else startRound(r); cb?.({ ok: true }); });
   s.on('disconnect', () => { const r = rooms.get(s.data.code); if (!r) return; if (s.data.role === 'host') { cleanup(r); return; } const p = all(r).find(x => x.id === s.id); if (!p) return; if (r.phase === 'lobby') { r.players = r.players.filter(x => x.id !== s.id); r.audience = r.audience.filter(x => x.id !== s.id); } else { p.connected = false; if (s.data.role === 'player' && r.phase !== 'finished') { timers(r); r.phase = 'finished'; r.deadline = 0; r.finishedAt = Date.now(); const remaining = r.players.filter(x => x.connected && !x.ai); r.champion = (remaining.sort((a,b) => b.score-a.score)[0] || r.players.find(x => x.ai))?.name || 'No winner'; r.finishReason = `${p.name} disconnected. The remaining player wins by forfeit.`; } } publish(r); });

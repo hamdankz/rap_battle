@@ -1,3 +1,5 @@
+> **Updated:** Players now privately choose one of three mystery beat cards per round. Each MC performs over their own selected beat, revealed during the showdown. See [ANONYMOUS-BEATS.md](ANONYMOUS-BEATS.md).
+
 # Robo Rhyme Royale
 
 Original, free, self-hostable multiplayer robot rap party game. **Not affiliated with Jackbox.**
