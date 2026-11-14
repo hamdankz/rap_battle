@@ -1,6 +1,74 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MC Library • Robo Rhyme Royale</title><link rel="stylesheet" href="/style.css"><style>.mcgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin-top:22px}.mccard{padding:20px;background:#252043;border:1px solid #65558d;border-radius:16px}.mccard .face{font-size:52px}.mccard input{margin:8px 0;font-size:16px}.mccard label{display:flex;align-items:center;gap:8px}.mccard label input{width:auto;margin:0}.mccard button{margin:8px 6px 0 0;padding:10px;min-height:40px}.muted{font-size:14px}#notice{color:var(--yellow)}</style></head><body><header><div class="brand">⚡ ROBO <span>RHYME</span> ROYALE</div></header><main><div class="panel"><a href="/" style="color:var(--cyan)">← Back to game</a><h1 style="font-size:clamp(32px,5vw,56px)">🎤 MC LIBRARY</h1><p>Manage preset MC cards and custom recorded MCs. Enabled MCs are eligible for random mystery cards; enabled recordings can be assigned as secret voices.</p><p class="muted">Only the host/admin should know the library key. Custom MCs are created from the <a href="/record.html" style="color:var(--cyan)">Record a Voice</a> page.</p><input type="password" id="key" placeholder="MC admin key (MC_ADMIN_KEY)" autocomplete="off"><button id="load">🔓 OPEN LIBRARY</button><p id="notice" role="status"></p><div id="mcgrid" class="mcgrid"></div></div></main><script>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MC Library • Robo Rhyme Royale</title><link rel="stylesheet" href="/style.css"><style>.mcgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin-top:22px}.mccard{padding:20px;background:#252043;border:1px solid #65558d;border-radius:16px}.mccard .face{font-size:52px}.mccard input{margin:8px 0;font-size:16px}.mccard label{display:flex;align-items:center;gap:8px}.mccard label input{width:auto;margin:0}.mccard button{margin:8px 6px 0 0;padding:10px;min-height:40px}.muted{font-size:14px}#notice{color:var(--yellow)}</style></head><body><header><div class="brand">⚡ ROBO <span>RHYME</span> ROYALE</div></header><main><div class="panel"><a href="/" style="color:var(--cyan)">← Back to game</a><h1 style="font-size:clamp(32px,5vw,56px)">🎤 MC LIBRARY</h1><p>Manage preset MC cards and custom recorded MCs. Enabled MCs are eligible for random mystery cards; enabled recordings can be assigned as secret voices.</p><p class="muted">Only the host/admin should know the library key. Custom MCs are created from the <a href="/record.html" style="color:var(--cyan)">Record a Voice</a> page.</p><input type="password" id="key" placeholder="MC admin key (MC_ADMIN_KEY)" autocomplete="off"><button id="load">🔓 OPEN LIBRARY</button><p id="notice" role="status"></p><div id="mcgrid" class="mcgrid"></div></div></main><script src="/kokoro-cast.js"></script><script>
 const $=id=>document.getElementById(id);let key='';
 async function api(url,opts={}){const r=await fetch(url,{...opts,headers:{'X-MC-Admin-Key':key,...opts.headers}});if(!r.ok){let msg='Request failed';try{msg=(await r.json()).error||msg}catch{}throw Error(msg)}return r}
 $('load').onclick=()=>{key=$('key').value;load()};
-async function load(){try{const data=await (await api('/api/mcs')).json();$('notice').textContent=`${data.length} MCs loaded (${data.filter(x=>x.type==='custom').length} custom)`;const grid=$('mcgrid');grid.replaceChildren();for(const mc of data){const card=document.createElement('div');card.className='mccard';const face=document.createElement('div');face.className='face';face.textContent=mc.emoji;const title=document.createElement('strong');title.textContent=mc.type==='preset'?'PRESET MC':'CUSTOM MC';const name=document.createElement('input');name.value=mc.name;name.maxLength=30;name.setAttribute('aria-label','MC name');const emoji=document.createElement('input');emoji.value=mc.emoji;emoji.maxLength=12;emoji.setAttribute('aria-label','MC emoji');const label=document.createElement('label');const check=document.createElement('input');check.type='checkbox';check.checked=mc.enabled;label.append(check,document.createTextNode('Enabled in game'));const save=document.createElement('button');save.textContent='Save changes';save.onclick=async()=>{try{await api('/api/mcs/'+encodeURIComponent(mc.id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name.value,emoji:emoji.value,enabled:check.checked})});face.textContent=emoji.value;$('notice').textContent='Saved '+name.value}catch(e){$('notice').textContent=e.message}};card.append(face,title,name,emoji,label,save);if(mc.type==='custom'){const owner=document.createElement('p');owner.className='muted';owner.textContent='Recorded by: '+mc.owner;const play=document.createElement('button');play.className='secondary';play.textContent='▶ Preview recording';play.onclick=async()=>{try{const blob=await (await api('/api/mcs/'+encodeURIComponent(mc.id)+'/preview')).blob();const url=URL.createObjectURL(blob);const audio=new Audio(url);audio.onended=()=>URL.revokeObjectURL(url);await audio.play()}catch(e){$('notice').textContent=e.message}};card.append(owner,play)}else{const note=document.createElement('p');note.className='muted';note.textContent='Preset card (no recorded voice)';card.append(note)}grid.append(card)}}catch(e){$('notice').textContent=e.message}}
+let previewAudio=null, previewUrl=null;
+function stopPreview(){
+  if(previewAudio){previewAudio.pause();previewAudio.src='';previewAudio=null;}
+  if(previewUrl){URL.revokeObjectURL(previewUrl);previewUrl=null;}
+  if('speechSynthesis' in window) speechSynthesis.cancel();
+}
+async function preview(mc, name, button, index){
+  stopPreview();
+  const original=button.textContent;
+  button.disabled=true;
+  button.textContent='⏳ Preparing voice…';
+  const phrase=`Hey! My name is ${name.trim() || mc.name} and this is my voice!`;
+  try {
+    if(mc.type==='custom'){
+      const blob=await (await api('/api/mcs/'+encodeURIComponent(mc.id)+'/preview')).blob();
+      previewUrl=URL.createObjectURL(blob);
+      previewAudio=new Audio(previewUrl);
+      $('notice').textContent=`${name}: playing original recording. Custom voice cloning is not yet available for this preview sentence.`;
+    } else {
+      const voice=window.KokoroCast.voiceFor(index);
+      const blob=await window.KokoroCast.speakWav(phrase,voice.id);
+      previewUrl=URL.createObjectURL(blob);
+      previewAudio=new Audio(previewUrl);
+      $('notice').textContent=`${name} — ${voice.label}`;
+    }
+    const audio=previewAudio;
+    audio.onended=()=>{if(previewAudio===audio)stopPreview()};
+    await audio.play();
+  }catch(e){
+    stopPreview();
+    $('notice').textContent=`Preview failed: ${e.message}`;
+    // A basic browser voice is still useful if the Kokoro CDN is unavailable.
+    if(mc.type==='preset' && 'speechSynthesis' in window){
+      const u=new SpeechSynthesisUtterance(phrase);
+      u.rate=1;
+      speechSynthesis.speak(u);
+      $('notice').textContent+=' — playing a basic browser voice instead.';
+    }
+  }finally{button.disabled=false;button.textContent=original;}
+}
+async function load(){
+ try{
+  stopPreview();
+  const data=await (await api('/api/mcs')).json();
+  $('notice').textContent=`${data.length} MCs loaded (${data.filter(x=>x.type==='custom').length} custom)`;
+  const grid=$('mcgrid');grid.replaceChildren();
+  let presetIndex=0;
+  for(const mc of data){
+   const card=document.createElement('div');card.className='mccard';
+   const face=document.createElement('div');face.className='face';face.textContent=mc.emoji;
+   const title=document.createElement('strong');title.textContent=mc.type==='preset'?'PRESET MC':'CUSTOM MC';
+   const name=document.createElement('input');name.value=mc.name;name.maxLength=30;name.setAttribute('aria-label','MC name');
+   const emoji=document.createElement('input');emoji.value=mc.emoji;emoji.maxLength=12;emoji.setAttribute('aria-label','MC emoji');
+   const label=document.createElement('label');const check=document.createElement('input');check.type='checkbox';check.checked=mc.enabled;
+   label.append(check,document.createTextNode('Enabled in game'));
+   const save=document.createElement('button');save.textContent='Save changes';
+   save.onclick=async()=>{try{await api('/api/mcs/'+encodeURIComponent(mc.id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name.value,emoji:emoji.value,enabled:check.checked})});face.textContent=emoji.value;$('notice').textContent='Saved '+name.value}catch(e){$('notice').textContent=e.message}};
+   const play=document.createElement('button');play.className='secondary';
+   play.textContent=mc.type==='preset'?'▶ Preview voice':'▶ Preview recording';
+   const thisIndex=mc.type==='preset'?presetIndex++:0;
+   play.onclick=()=>preview(mc,name.value,play,thisIndex);
+   card.append(face,title,name,emoji,label,save,play);
+   const note=document.createElement('p');note.className='muted';
+   note.textContent=mc.type==='preset'?'Preview: “Hey! My name is [MC name] and this is my voice!”':'Recorded by: '+mc.owner+' • Preview plays the original recording; it cannot yet generate the introduction in the recorded voice.';
+   card.append(note);grid.append(card);
+  }
+ }catch(e){$('notice').textContent=e.message}
+}
+window.addEventListener('pagehide',stopPreview);
 </script></body></html>
